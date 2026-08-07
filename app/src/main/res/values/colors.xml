@@ -1,0 +1,43 @@
+<resources>
+    <!-- MD3 Primary -->
+    <color name="primary">#006B4F</color>
+    <color name="on_primary">#FFFFFF</color>
+    <color name="primary_container">#8CF8C9</color>
+    <color name="on_primary_container">#002115</color>
+
+    <!-- MD3 Secondary -->
+    <color name="secondary">#4C6357</color>
+    <color name="on_secondary">#FFFFFF</color>
+    <color name="secondary_container">#CFE9D9</color>
+    <color name="on_secondary_container">#092015</color>
+
+    <!-- MD3 Tertiary -->
+    <color name="tertiary">#3D6473</color>
+    <color name="on_tertiary">#FFFFFF</color>
+    <color name="tertiary_container">#C0E8FB</color>
+    <color name="on_tertiary_container">#001F29</color>
+
+    <!-- MD3 Error -->
+    <color name="error">#BA1A1A</color>
+    <color name="on_error">#FFFFFF</color>
+    <color name="error_container">#FFDAD6</color>
+
+    <!-- MD3 Background & Surface -->
+    <color name="background">#FBFDF8</color>
+    <color name="on_background">#191C1A</color>
+    <color name="surface">#FBFDF8</color>
+    <color name="on_surface">#191C1A</color>
+    <color name="surface_variant">#DBE5DD</color>
+    <color name="on_surface_variant">#404942</color>
+    <color name="outline">#707973</color>
+
+    <!-- App specific -->
+    <color name="float_window_bg">#E8006B4F</color>
+    <color name="float_window_text">#FFFFFF</color>
+    <color name="float_window_accent">#8CF8C9</color>
+    <color name="status_connected">#4CAF50</color>
+    <color name="status_disconnected">#F44336</color>
+    <color name="status_connecting">#FF9800</color>
+    <color name="status_warning">#FF9800</color>
+    <color name="float_window_divider">#33FFFFFF</color>
+</resources>

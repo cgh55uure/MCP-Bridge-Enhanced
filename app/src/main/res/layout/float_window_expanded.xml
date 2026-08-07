@@ -1,0 +1,293 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 悬浮窗展开模式：控制面板 - 显示两个隧道状态 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/bg_float_panel"
+    android:padding="12dp">
+
+    <LinearLayout
+        android:id="@+id/llFloatPanel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:minWidth="220dp">
+
+        <!-- 标题栏 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="8dp">
+
+            <TextView
+                android:id="@+id/tvPanelStatus"
+                android:layout_width="10dp"
+                android:layout_height="10dp"
+                android:background="@drawable/circle_indicator"
+                android:layout_marginEnd="6dp" />
+
+            <TextView
+                android:id="@+id/tvPanelTitle"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="MCP 隧道"
+                android:textColor="@color/float_window_text"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tvPanelClose"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="✕"
+                android:textColor="@color/float_window_text"
+                android:textSize="16sp"
+                android:padding="4dp"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
+        <!-- ===== Bore 隧道区域 ===== -->
+        <LinearLayout
+            android:id="@+id/llBoreSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="6dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvBoreStatus"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/circle_indicator"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Bore"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:id="@+id/tvBoreUrl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text=""
+                    android:textColor="@color/float_window_accent"
+                    android:textSize="10sp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tvBoreCopy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="复制"
+                    android:textColor="@color/float_window_accent"
+                    android:textSize="10sp"
+                    android:paddingLeft="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingRight="4dp"
+                    android:paddingBottom="2dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginTop="2dp">
+
+                <TextView
+                    android:id="@+id/tvBoreToggle"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="启动"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_float_btn"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/tvBoreDisconnect"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="断开"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_float_btn"
+                    android:layout_marginStart="4dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 分隔线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/float_window_divider"
+            android:layout_marginBottom="6dp" />
+
+        <!-- ===== Cloudflare 隧道区域 ===== -->
+        <LinearLayout
+            android:id="@+id/llCfSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="6dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvCfStatus"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/circle_indicator"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="CF"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:layout_marginEnd="4dp" />
+
+                <TextView
+                    android:id="@+id/tvCfUrl"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text=""
+                    android:textColor="@color/float_window_accent"
+                    android:textSize="10sp"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:visibility="gone" />
+
+                <TextView
+                    android:id="@+id/tvCfCopy"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="复制"
+                    android:textColor="@color/float_window_accent"
+                    android:textSize="10sp"
+                    android:paddingLeft="4dp"
+                    android:paddingTop="2dp"
+                    android:paddingRight="4dp"
+                    android:paddingBottom="2dp"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:visibility="gone" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center"
+                android:layout_marginTop="2dp">
+
+                <TextView
+                    android:id="@+id/tvCfToggle"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="启动"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_float_btn"
+                    android:layout_marginEnd="4dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+
+                <TextView
+                    android:id="@+id/tvCfDisconnect"
+                    android:layout_width="0dp"
+                    android:layout_height="28dp"
+                    android:layout_weight="1"
+                    android:gravity="center"
+                    android:text="断开"
+                    android:textColor="@color/float_window_text"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_float_btn"
+                    android:layout_marginStart="4dp"
+                    android:clickable="true"
+                    android:focusable="true" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- 分隔线 -->
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:background="@color/float_window_divider"
+            android:layout_marginBottom="6dp" />
+
+        <!-- ===== MCP Server 状态 ===== -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvMcpStatus"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:background="@drawable/circle_indicator"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="MCP"
+                android:textColor="@color/float_window_text"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:layout_marginEnd="4dp" />
+
+            <TextView
+                android:id="@+id/tvMcpInfo"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text=":8080"
+                android:textColor="@color/float_window_accent"
+                android:textSize="10sp" />
+        </LinearLayout>
+
+    </LinearLayout>
+
+</FrameLayout>

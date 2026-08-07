@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 悬浮窗简洁模式：小圆点气泡 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="48dp"
+    android:layout_height="48dp"
+    android:background="@drawable/bg_float_bubble"
+    android:clickable="true"
+    android:focusable="true">
+
+    <TextView
+        android:id="@+id/tvFloatBubble"
+        android:layout_width="24dp"
+        android:layout_height="24dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:text="●"
+        android:textSize="18sp"
+        android:textColor="@color/status_disconnected" />
+
+</FrameLayout>

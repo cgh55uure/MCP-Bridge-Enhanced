@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 中间桥接图标 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M38,40 L38,68 L54,68 L54,54 L70,54 L70,40 Z" />
+
+    <!-- 连接线 - 左 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M22,54 L38,54" />
+
+    <!-- 连接线 - 右 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="M70,54 L86,54" />
+
+    <!-- 小圆点 - 左 -->
+    <path
+        android:fillColor="#03DAC5"
+        android:pathData="M18,54 m-4,0 a4,4 0,1 1,8 0 a4,4 0,1 1,-8 0" />
+
+    <!-- 小圆点 - 右 -->
+    <path
+        android:fillColor="#03DAC5"
+        android:pathData="M90,54 m-4,0 a4,4 0,1 1,8 0 a4,4 0,1 1,-8 0" />
+
+</vector>
