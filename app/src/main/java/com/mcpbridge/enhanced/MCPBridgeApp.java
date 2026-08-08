@@ -10,6 +10,7 @@ public class MCPBridgeApp extends Application {
     public static final String CHANNEL_TUNNEL = "channel_tunnel";
     public static final String CHANNEL_FLOAT = "channel_float";
     public static final String CHANNEL_DAEMON = "channel_daemon";
+    public static final String CHANNEL_MEDIA = "channel_media";
 
     @Override
     public void onCreate() {
@@ -45,9 +46,20 @@ public class MCPBridgeApp extends Application {
             daemonChannel.setDescription("守护进程通知");
             daemonChannel.setShowBadge(false);
 
+            // 媒体播放通知频道（用于 mediaPlayback 前台服务）
+            NotificationChannel mediaChannel = new NotificationChannel(
+                    CHANNEL_MEDIA,
+                    "媒体保活",
+                    NotificationManager.IMPORTANCE_MIN
+            );
+            mediaChannel.setDescription("媒体保活服务通知");
+            mediaChannel.setShowBadge(false);
+            mediaChannel.setSound(null, null);
+
             nm.createNotificationChannel(tunnelChannel);
             nm.createNotificationChannel(floatChannel);
             nm.createNotificationChannel(daemonChannel);
+            nm.createNotificationChannel(mediaChannel);
         }
     }
 }

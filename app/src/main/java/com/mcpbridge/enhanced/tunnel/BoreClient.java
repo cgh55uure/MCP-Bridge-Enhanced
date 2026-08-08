@@ -65,6 +65,10 @@ public class BoreClient {
     private static final byte NULL_DELIMITER = 0x00;
     private static final int MAX_FRAME_LENGTH = 65536;
 
+    // 客户端心跳间隔（NAT 保活）：移动网络 NAT 映射通常在 30-60s 回收
+    // 每 15 秒发送一次心跳，确保 TCP 连接在 NAT 网关中保持活跃
+    private static final int HEARTBEAT_INTERVAL_MS = 15000;
+
     // 自动重连
     private volatile boolean autoReconnect = true;
     private final AtomicInteger reconnectAttempts = new AtomicInteger(0);
@@ -199,6 +203,12 @@ public class BoreClient {
                 } catch (SocketException e) {
                     // keepalive 不是关键功能，忽略失败
                 }
+                // 禁用 Nagle 算法，减少小包延迟，提升控制消息响应速度
+                try {
+                    controlSocket.setTcpNoDelay(true);
+                } catch (SocketException e) {
+                    // 非关键功能，忽略失败
+                }
 
                 // ===== 协议握手 (标准 ekzhang/bore 协议) =====
                 // 1. 客户端发送 {"Hello":期望的远程端口}\0 (0=让服务器自动分配)
@@ -278,8 +288,10 @@ public class BoreClient {
                     listener.onConnected(publicUrl);
                 }
 
-                // 设置控制 socket 读取超时，以便检测心跳超时
-                controlSocket.setSoTimeout(30000);
+                // 设置控制 socket 读取超时，超时后发送心跳保活
+                // 移动网络 NAT 映射通常在 30-60s 内回收空闲连接，
+                // 客户端主动发送心跳帧可保持 NAT 映射活跃
+                controlSocket.setSoTimeout(HEARTBEAT_INTERVAL_MS);
 
                 // 控制通道循环：读取 JSON 消息
                 while (running && !controlSocket.isClosed()) {
@@ -289,7 +301,8 @@ public class BoreClient {
                     try {
                         msg = readJsonMessage(controlIn);
                     } catch (SocketTimeoutException e) {
-                        // 读取超时不代表连接断开，继续等待
+                        // 读取超时 → 发送心跳保活，防止 NAT 映射超时回收
+                        sendKeepAlive(controlOut);
                         continue;
                     } catch (SocketException e) {
                         if (running) fireEvent(now() + " 控制连接异常: " + e.getMessage());
@@ -478,6 +491,25 @@ public class BoreClient {
                 .replace("\t", "\\t");
     }
 
+    /**
+     * 发送心跳保活帧，防止移动网络 NAT 映射超时回收 TCP 连接
+     *
+     * 标准 ekzhang/bore 协议使用 AnyDelimiterCodec 处理消息帧，
+     * 服务器收到 {"Heartbeat":null} 后会忽略该消息（与服务器发往客户端的心跳格式一致）。
+     * 发送心跳的主要目的是在 TCP 层面产生数据流，重置 NAT 网关的空闲计时器，
+     * 避免因长时间无数据交互导致 NAT 映射被回收、控制连接断开。
+     */
+    private void sendKeepAlive(OutputStream out) {
+        try {
+            // 心跳消息格式与服务器心跳一致，服务器会忽略客户端发来的心跳消息
+            String heartbeat = "{\"Heartbeat\":null}\0";
+            out.write(heartbeat.getBytes(StandardCharsets.UTF_8));
+            out.flush();
+        } catch (IOException e) {
+            // 写失败说明连接已断开，由主循环的 SocketException 捕获处理
+        }
+    }
+
     private void handleDataConnection(String connId) {
         Socket dataSocket = null;
         Socket localSocket = null;
@@ -489,6 +521,12 @@ public class BoreClient {
             dataSocket = new Socket();
             dataSocket.connect(new InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS);
             dataSocket.setSoTimeout(0);
+            // 禁用 Nagle 算法，减少数据转发延迟
+            try {
+                dataSocket.setTcpNoDelay(true);
+            } catch (SocketException e) {
+                // 非关键功能，忽略失败
+            }
 
             InputStream dataIn = dataSocket.getInputStream();
             OutputStream dataOut = dataSocket.getOutputStream();

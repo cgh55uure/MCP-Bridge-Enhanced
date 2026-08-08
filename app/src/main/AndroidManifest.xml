@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- 省电与白名单 -->
@@ -96,7 +97,7 @@
         <service
             android:name=".keepalive.DaemonService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|mediaPlayback" />
 
         <!-- JobScheduler 保活 -->
         <service
@@ -109,7 +110,7 @@
             android:name=".keepalive.DoubleProcessKeepAlive"
             android:exported="false"
             android:process=":daemon"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|mediaPlayback" />
 
         <!-- 广播接收器 -->
         <receiver
