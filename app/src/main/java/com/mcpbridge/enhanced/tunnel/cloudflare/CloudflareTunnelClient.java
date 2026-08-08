@@ -102,6 +102,14 @@ public class CloudflareTunnelClient {
     private static final long HEALTH_CHECK_TIMEOUT_MS = 800;
     private volatile boolean healthCheckPassed = false;
 
+    // 健康检查防抖：参考 SOMCP 的 downSince / lastRestartAt 方案
+    private volatile long healthCheckDownSince = 0L;
+    private volatile long healthCheckLastRestartAt = 0L;
+    private volatile int healthCheckStableCount = 0;
+    private final java.util.concurrent.atomic.AtomicInteger keepaliveRestarts = new java.util.concurrent.atomic.AtomicInteger(0);
+    private static final long HEALTH_CHECK_DOWN_THRESHOLD_MS = 8000;   // 连续失败 8 秒才触发保活重启
+    private static final long HEALTH_CHECK_RESTART_COOLDOWN_MS = 15000; // 两次保活重启至少间隔 15 秒
+
     // URL 匹配模式
     private static final Pattern URL_PATTERN =
             Pattern.compile("https?://[a-zA-Z0-9][-a-zA-Z0-9]*\\.trycloudflare\\.com");
@@ -141,6 +149,11 @@ public class CloudflareTunnelClient {
         connected.set(false);
         reconnectAttempts = 0;
         currentPublicUrl = null;
+        // 重置健康检查状态
+        healthCheckPassed = false;
+        healthCheckDownSince = 0L;
+        healthCheckLastRestartAt = 0L;
+        healthCheckStableCount = 0;
         executor.submit(this::startInternal);
     }
 
@@ -251,6 +264,13 @@ public class CloudflareTunnelClient {
                 if (listener != null) listener.onDisconnected();
                 return;
             }
+        }
+
+        // 参考 SOMCP 方案：generation 检查 — API 注册后可能已被 stop()
+        if (stopRequested || generation.get() != runGeneration) {
+            fireLog("startInternal: API 注册后被停止，放弃本次启动");
+            running.set(false);
+            return;
         }
 
         // 4. 构建命令列表（参考 SOMCP 方案）
@@ -505,16 +525,27 @@ public class CloudflareTunnelClient {
     /**
      * 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck + probeLocal 方案）。
      * 每 5 秒探测一次 MCP Server 本地端口，检测服务是否可达。
+     *
+     * 防抖逻辑（参考 SOMCP）：
+     * - 连续失败超过 8 秒才触发保活重启
+     * - 两次保活重启至少间隔 15 秒
+     * - 重启前检查 stopRequested，防止在停止过程中误重启
+     * - 整个循环包在 try/catch(InterruptedException) 中，防止 stop() 中断线程时崩溃
      */
     private void startHealthCheck() {
         stopHealthCheck();
         final int runGeneration = generation.get();
         healthCheckThread = new Thread(() -> {
+            // 参考 SOMCP 方案：防抖状态变量
+            int stable = 0;
+            long downSince = 0L;
+            long lastRestartAt = 0L;
             try {
                 while (!stopRequested && generation.get() == runGeneration && running.get()) {
                     try {
                         Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
                     } catch (InterruptedException e) {
+                        // 参考 SOMCP：stop() 中断睡眠时预期抛出，直接退出循环
                         break;
                     }
                     if (stopRequested || generation.get() != runGeneration || !running.get()) break;
@@ -530,16 +561,46 @@ public class CloudflareTunnelClient {
                     }
 
                     if (probeOk) {
+                        stable++;
+                        downSince = 0L;
                         if (!healthCheckPassed) {
                             healthCheckPassed = true;
+                            healthCheckDownSince = 0L;
+                            healthCheckStableCount = 0;
                             fireLog("[健康检查] MCP Server 端口 " + localPort + " 可达 ✓");
                         }
                     } else {
+                        stable = 0;
                         healthCheckPassed = false;
-                        fireLog("[健康检查] MCP Server 端口 " + localPort + " 不可达 ✗");
-                        // 如果隧道已连接但 MCP Server 端口不可达，报告错误
-                        if (connected.get()) {
-                            fireError("MCP Server 端口 " + localPort + " 不可达，隧道可能失效");
+                        if (downSince == 0L) downSince = System.currentTimeMillis();
+                        healthCheckDownSince = downSince;
+                        long downElapsed = System.currentTimeMillis() - downSince;
+                        fireLog("[健康检查] MCP Server 端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
+
+                        // 参考 SOMCP：仅当隧道已连接时才触发保活重启
+                        if (connected.get() && downElapsed >= HEALTH_CHECK_DOWN_THRESHOLD_MS) {
+                            long sinceLastRestart = System.currentTimeMillis() - lastRestartAt;
+                            if (sinceLastRestart >= HEALTH_CHECK_RESTART_COOLDOWN_MS) {
+                                // 参考 SOMCP：重启前检查 stopRequested 硬门控
+                                if (stopRequested) {
+                                    fireLog("[健康检查] 保活重启被 stopRequested 阻止");
+                                    break;
+                                }
+                                lastRestartAt = System.currentTimeMillis();
+                                healthCheckLastRestartAt = lastRestartAt;
+                                keepaliveRestarts.incrementAndGet();
+                                fireLog("[健康检查] 端口持续不可达，触发生保活重启 (距上次重启 " + (sinceLastRestart / 1000) + " 秒)");
+                                fireError("MCP Server 端口 " + localPort + " 持续不可达，触发隧道保活重启");
+                                // 参考 SOMCP：使用 startInternal 风格的重新启动
+                                // 这里通过 stop() + start() 实现重启，generation 会递增，旧健康线程会退出
+                                stop();
+                                start();
+                                return;
+                            } else {
+                                fireLog("[健康检查] 距上次重启仅 " + (sinceLastRestart / 1000) + " 秒，跳过保活重启");
+                            }
+                        } else if (connected.get()) {
+                            fireLog("[健康检查] 端口不可达但未超过阈值 (" + HEALTH_CHECK_DOWN_THRESHOLD_MS / 1000 + " 秒)，等待...");
                         }
                     }
                 }

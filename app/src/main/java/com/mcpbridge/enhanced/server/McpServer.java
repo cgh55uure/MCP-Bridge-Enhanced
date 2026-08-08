@@ -115,8 +115,11 @@ public class McpServer {
         }
 
         try {
-            serverSocket = new ServerSocket(port, 50, java.net.InetAddress.getByName(host));
+            // 先创建未绑定的 ServerSocket，设置 reuseAddress 后再 bind
+            // 参考 SOMCP 方案：setReuseAddress 必须在 bind 之前设置才有效
+            serverSocket = new ServerSocket();
             serverSocket.setReuseAddress(true);
+            serverSocket.bind(new java.net.InetSocketAddress(host, port), 50);
             threadPool = Executors.newCachedThreadPool(r -> {
                 Thread t = new Thread(r, "mcp-server-" + requestCount.incrementAndGet());
                 t.setDaemon(true);
@@ -131,7 +134,11 @@ public class McpServer {
             Log.i(TAG, "MCP Server 已启动: " + host + ":" + port);
             return true;
         } catch (IOException e) {
-            Log.e(TAG, "MCP Server 启动失败: " + e.getMessage());
+            Log.e(TAG, "MCP Server 启动失败 [" + e.getClass().getSimpleName() + "]: " + e.getMessage());
+            running.set(false);
+            return false;
+        } catch (Exception e) {
+            Log.e(TAG, "MCP Server 启动异常 [" + e.getClass().getSimpleName() + "]: " + e.getMessage());
             running.set(false);
             return false;
         }

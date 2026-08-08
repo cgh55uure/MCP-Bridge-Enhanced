@@ -226,29 +226,10 @@ public class CloudflareTunnelService extends Service {
     }
 
     public static boolean isRunning(Context context) {
-        // 同时检查 SharedPreferences 标记和实际进程状态
-        // 避免 app 被杀死后标记仍为 true 导致 UI 显示错误
-        boolean prefRunning = context.getSharedPreferences("cf_tunnel", MODE_PRIVATE)
+        // 检查 SharedPreferences 标记
+        // Cloudflare 隧道状态依赖客户端进程，不适合通过本地端口探活
+        return context.getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .getBoolean(PREF_CF_RUNNING, false);
-        if (!prefRunning) return false;
-
-        // 额外检查：TCP 探活本地端口，确认服务是否真实可达
-        // 如果 SharedPreferences 标记为 true 但端口不可达，说明隧道已死
-        int port = context.getSharedPreferences("cf_tunnel", MODE_PRIVATE)
-                .getInt("cf_local_port", 8080);
-        try {
-            java.net.Socket s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
-            s.close();
-            return true;
-        } catch (Exception e) {
-            // 端口不可达，标记为未运行
-            context.getSharedPreferences("cf_tunnel", MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(PREF_CF_RUNNING, false)
-                    .apply();
-            return false;
-        }
     }
 
     public static String getTunnelUrl(Context context) {

@@ -215,29 +215,11 @@ public class TunnelService extends Service {
     }
 
     public static boolean isRunning(Context context) {
-        // 同时检查 SharedPreferences 标记和实际进程状态
-        // 避免 app 被杀死后标记仍为 true 导致 UI 显示错误
-        boolean prefRunning = context.getSharedPreferences("tunnel", MODE_PRIVATE)
+        // 检查 SharedPreferences 标记
+        // Bore 隧道是无状态转发，不监听本地端口，对端进程一死端口立刻释放
+        // 状态只有两种：连接中（活着）或 EOF（死了），不需要 TCP 探活
+        return context.getSharedPreferences("tunnel", MODE_PRIVATE)
                 .getBoolean(PREF_TUNNEL_RUNNING, false);
-        if (!prefRunning) return false;
-
-        // 额外检查：TCP 探活本地端口，确认服务是否真实可达
-        // 如果 SharedPreferences 标记为 true 但端口不可达，说明隧道已死
-        int port = context.getSharedPreferences("tunnel", MODE_PRIVATE)
-                .getInt("local_port", 8080);
-        try {
-            java.net.Socket s = new java.net.Socket();
-            s.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
-            s.close();
-            return true;
-        } catch (Exception e) {
-            // 端口不可达，标记为未运行
-            context.getSharedPreferences("tunnel", MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(PREF_TUNNEL_RUNNING, false)
-                    .apply();
-            return false;
-        }
     }
 
     public static String getTunnelUrl(Context context) {
