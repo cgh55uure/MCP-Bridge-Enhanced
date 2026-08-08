@@ -53,6 +53,9 @@ public class BoreClient {
     private volatile boolean running = false;
     private final ExecutorService dataExecutor;
 
+    // 服务器分配的端口（start() 中设置，handleDataConnection 中使用）
+    private volatile int assignedPort = -1;
+
     private static final int DEFAULT_BORE_PORT = 7835;
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int LOCAL_CONNECT_TIMEOUT_MS = 5000;
@@ -70,6 +73,20 @@ public class BoreClient {
 
     // 参考 SOMCP 方案：generation 并发控制
     private final AtomicInteger generation = new AtomicInteger(0);
+
+    // 健康检查（参考 CloudflareTunnelClient 的 startHealthCheck）
+    private Thread healthCheckThread;
+    private static final long HEALTH_CHECK_INTERVAL_MS = 5000;
+    private static final long HEALTH_CHECK_TIMEOUT_MS = 800;
+    private volatile boolean healthCheckPassed = false;
+    private volatile long healthCheckDownSince = 0L;
+    private volatile long healthCheckLastRestartAt = 0L;
+    private static final long HEALTH_CHECK_DOWN_THRESHOLD_MS = 8000;
+    private static final long HEALTH_CHECK_RESTART_COOLDOWN_MS = 15000;
+
+    // 连接超时检测
+    private Thread connectTimeoutThread;
+    private static final long CONNECT_TIMEOUT_TOTAL_MS = 60000;
 
     public BoreClient(String boreHost, int localPort) {
         this(parseHost(boreHost), parsePort(boreHost, DEFAULT_BORE_PORT), localPort, parseSecret(boreHost));
@@ -253,8 +270,18 @@ public class BoreClient {
                     }
                 }
 
+                // 保存分配的端口，供 handleDataConnection 使用
+                this.assignedPort = assignedPort;
+
                 String publicUrl = "http://" + boreHost + ":" + assignedPort;
                 fireEvent(now() + " 隧道已建立，公网地址: " + publicUrl);
+
+                // 连接成功，取消超时检测
+                cancelConnectTimeout();
+
+                // 启动本地端口健康检查（参考 CloudflareTunnelClient 的 startHealthCheck 方案）
+                // 每 5 秒探测一次 MCP Server 端口，确保服务可达
+                startHealthCheck();
 
                 if (listener != null) {
                     listener.onConnected(publicUrl);
@@ -332,6 +359,9 @@ public class BoreClient {
         tunnelThread.setDaemon(true);
         tunnelThread.setName("bore-tunnel");
         tunnelThread.start();
+
+        // 启动连接超时检测（参考 CloudflareTunnelClient 的 startConnectTimeout 方案）
+        startConnectTimeout();
     }
 
     private void scheduleReconnect() {
@@ -450,6 +480,10 @@ public class BoreClient {
         Socket dataSocket = null;
         Socket localSocket = null;
         try {
+            // 数据连接始终使用控制端口（borePort），这是标准 ekzhang/bore 协议的要求。
+            // assignedPort 是服务器分配的公网端口，供外部客户端连接使用，
+            // bore 客户端的数据连接应该连接控制端口，通过 Accept 消息与外部连接桥接。
+            // 参考 Cloudflare 隧道：数据连接是独立于控制通道的 TCP 连接，但端口相同。
             dataSocket = new Socket();
             dataSocket.connect(new InetSocketAddress(boreHost, borePort), CONNECT_TIMEOUT_MS);
             dataSocket.setSoTimeout(0);
@@ -549,6 +583,131 @@ public class BoreClient {
     }
 
     /**
+     * 启动本地端口健康检查（参考 CloudflareTunnelClient 的 startHealthCheck 方案）。
+     * 每 5 秒探测一次 MCP Server 本地端口，检测服务是否可达。
+     *
+     * 防抖逻辑（参考 SOMCP）：
+     * - 连续失败超过 8 秒才触发保活重启
+     * - 两次保活重启至少间隔 15 秒
+     * - 重启前检查 stopRequested，防止在停止过程中误重启
+     */
+    private void startHealthCheck() {
+        stopHealthCheck();
+        final int runGeneration = generation.get();
+        healthCheckThread = new Thread(() -> {
+            long downSince = 0L;
+            long lastRestartAt = 0L;
+            try {
+                while (!stopRequested && generation.get() == runGeneration && running) {
+                    try {
+                        Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                    if (stopRequested || generation.get() != runGeneration || !running) break;
+
+                    // TCP 探活本地端口（参考 SOMCP 的 probeLocal）
+                    boolean probeOk = false;
+                    try {
+                        java.net.Socket s = new java.net.Socket();
+                        s.connect(new java.net.InetSocketAddress("127.0.0.1", localPort), (int) HEALTH_CHECK_TIMEOUT_MS);
+                        s.close();
+                        probeOk = true;
+                    } catch (Exception ignored) {
+                    }
+
+                    if (probeOk) {
+                        downSince = 0L;
+                        if (!healthCheckPassed) {
+                            healthCheckPassed = true;
+                            healthCheckDownSince = 0L;
+                            fireEvent(now() + " [健康检查] MCP Server 端口 " + localPort + " 可达 ✓");
+                        }
+                    } else {
+                        healthCheckPassed = false;
+                        if (downSince == 0L) downSince = System.currentTimeMillis();
+                        healthCheckDownSince = downSince;
+                        long downElapsed = System.currentTimeMillis() - downSince;
+                        fireEvent(now() + " [健康检查] MCP Server 端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
+
+                        // 仅当隧道已连接时才触发保活重启
+                        if (running && downElapsed >= HEALTH_CHECK_DOWN_THRESHOLD_MS) {
+                            long sinceLastRestart = System.currentTimeMillis() - lastRestartAt;
+                            if (sinceLastRestart >= HEALTH_CHECK_RESTART_COOLDOWN_MS) {
+                                if (stopRequested) {
+                                    fireEvent(now() + " [健康检查] 保活重启被 stopRequested 阻止");
+                                    break;
+                                }
+                                lastRestartAt = System.currentTimeMillis();
+                                healthCheckLastRestartAt = lastRestartAt;
+                                fireEvent(now() + " [健康检查] 端口持续不可达，触发生保活重启 (距上次重启 " + (sinceLastRestart / 1000) + " 秒)");
+                                // 通过 stop() + start() 实现重启，generation 会递增，旧健康线程会退出
+                                stop();
+                                start();
+                                return;
+                            } else {
+                                fireEvent(now() + " [健康检查] 距上次重启仅 " + (sinceLastRestart / 1000) + " 秒，跳过保活重启");
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                if (!stopRequested) {
+                    fireEvent(now() + " [健康检查] 异常: " + e.getMessage());
+                }
+            }
+        }, "bore-health");
+        healthCheckThread.setDaemon(true);
+        healthCheckThread.start();
+    }
+
+    private void stopHealthCheck() {
+        if (healthCheckThread != null) {
+            healthCheckThread.interrupt();
+            healthCheckThread = null;
+        }
+    }
+
+    /**
+     * 启动连接超时检测（参考 CloudflareTunnelClient 的 startConnectTimeout 方案）。
+     * 如果隧道在指定时间内未连接成功，则触发超时错误。
+     */
+    private void startConnectTimeout() {
+        cancelConnectTimeout();
+        final int runGeneration = generation.get();
+        connectTimeoutThread = new Thread(() -> {
+            long startTime = System.currentTimeMillis();
+            while (running && !stopRequested && generation.get() == runGeneration) {
+                long elapsed = System.currentTimeMillis() - startTime;
+                if (elapsed > CONNECT_TIMEOUT_TOTAL_MS) {
+                    fireEvent(now() + " 连接超时 (" + CONNECT_TIMEOUT_TOTAL_MS / 1000 + " 秒)");
+                    if (listener != null) listener.onError("连接超时，未能建立 Bore 隧道");
+                    boolean shouldReconnect = autoReconnect && !stopRequested && reconnectAttempts.get() < MAX_RECONNECT_ATTEMPTS;
+                    stop();
+                    if (shouldReconnect) {
+                        scheduleReconnect();
+                    }
+                    return;
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+        }, "bore-connect-timeout");
+        connectTimeoutThread.setDaemon(true);
+        connectTimeoutThread.start();
+    }
+
+    private void cancelConnectTimeout() {
+        if (connectTimeoutThread != null) {
+            connectTimeoutThread.interrupt();
+            connectTimeoutThread = null;
+        }
+    }
+
+    /**
      * 参考 SOMCP 方案：轻量级停止请求，从主线程同步设置 stopRequested，
      * 防止在 stop() 实际执行前有重连线程重新进入 start()。
      */
@@ -567,6 +726,8 @@ public class BoreClient {
         running = false;
         stopRequested = true;
         generation.incrementAndGet();
+        stopHealthCheck();
+        cancelConnectTimeout();
         if (reconnectThread != null) {
             reconnectThread.interrupt();
             reconnectThread = null;
