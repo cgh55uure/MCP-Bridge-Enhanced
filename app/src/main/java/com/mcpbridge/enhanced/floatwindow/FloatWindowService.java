@@ -1,6 +1,7 @@
 package com.mcpbridge.enhanced.floatwindow;
 
 import android.app.Notification;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.BroadcastReceiver;
@@ -95,6 +96,12 @@ public class FloatWindowService extends Service {
 
         boolean anyConnected = boreConnected || cfConnected;
         floatWindowManager.updateStatus(anyConnected, null);
+
+        // 同步更新通知栏，确保用户通过通知也能看到最新隧道状态
+        NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (nm != null) {
+            nm.notify(NOTIFICATION_ID, buildNotification());
+        }
     }
 
     private Notification buildNotification() {
