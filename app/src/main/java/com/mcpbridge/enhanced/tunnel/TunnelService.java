@@ -186,7 +186,7 @@ public class TunnelService extends Service {
         );
 
         return new NotificationCompat.Builder(this, MCPBridgeApp.CHANNEL_TUNNEL)
-                .setContentTitle("MCP Bridge 隧道")
+                .setContentTitle("隧道桥接")
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.ic_menu_share)
                 .setContentIntent(pendingIntent)

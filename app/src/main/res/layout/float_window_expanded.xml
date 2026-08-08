@@ -34,7 +34,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="MCP 隧道"
+                android:text="隧道状态"
                 android:textColor="@color/float_window_text"
                 android:textSize="14sp"
                 android:textStyle="bold" />
@@ -255,39 +255,6 @@
             android:background="@color/float_window_divider"
             android:layout_marginBottom="6dp" />
 
-        <!-- ===== MCP Server 状态 ===== -->
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical">
-
-            <TextView
-                android:id="@+id/tvMcpStatus"
-                android:layout_width="8dp"
-                android:layout_height="8dp"
-                android:background="@drawable/circle_indicator"
-                android:layout_marginEnd="4dp" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="MCP"
-                android:textColor="@color/float_window_text"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:layout_marginEnd="4dp" />
-
-            <TextView
-                android:id="@+id/tvMcpInfo"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text=":8080"
-                android:textColor="@color/float_window_accent"
-                android:textSize="10sp" />
         </LinearLayout>
-
-    </LinearLayout>
 
 </FrameLayout>

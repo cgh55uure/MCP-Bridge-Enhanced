@@ -1,8 +1,8 @@
 <resources>
-    <string name="app_name">MCP Bridge Enhanced</string>
+    <string name="app_name">隧道桥接</string>
     <string name="tunnel_running">隧道运行中</string>
     <string name="tunnel_stopped">隧道已停止</string>
-    <string name="float_window_title">MCP Bridge 状态</string>
+    <string name="float_window_title">隧道状态</string>
     <string name="start_service">启动服务</string>
     <string name="stop_service">停止服务</string>
     <string name="setting_opacity">透明度</string>

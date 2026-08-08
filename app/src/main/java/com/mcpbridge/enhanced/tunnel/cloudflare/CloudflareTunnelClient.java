@@ -336,7 +336,7 @@ public class CloudflareTunnelClient {
             startConnectTimeout();
 
             // 7. 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck 方案）
-            //    每 5 秒探测一次 MCP Server 端口，确保服务可达
+            // 每 5 秒探测一次本地服务端口，确保服务可达
             startHealthCheck();
 
             // 7. 读取 stdout（同步读取，确保不丢失输出）
@@ -524,7 +524,7 @@ public class CloudflareTunnelClient {
 
     /**
      * 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck + probeLocal 方案）。
-     * 每 5 秒探测一次 MCP Server 本地端口，检测服务是否可达。
+     * 每 5 秒探测一次本地端口，检测服务是否可达。
      *
      * 防抖逻辑（参考 SOMCP）：
      * - 连续失败超过 8 秒才触发保活重启
@@ -567,7 +567,7 @@ public class CloudflareTunnelClient {
                             healthCheckPassed = true;
                             healthCheckDownSince = 0L;
                             healthCheckStableCount = 0;
-                            fireLog("[健康检查] MCP Server 端口 " + localPort + " 可达 ✓");
+                            fireLog("[健康检查] 本地服务端口 " + localPort + " 可达 ✓");
                         }
                     } else {
                         stable = 0;
@@ -575,7 +575,7 @@ public class CloudflareTunnelClient {
                         if (downSince == 0L) downSince = System.currentTimeMillis();
                         healthCheckDownSince = downSince;
                         long downElapsed = System.currentTimeMillis() - downSince;
-                        fireLog("[健康检查] MCP Server 端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
+                        fireLog("[健康检查] 本地服务端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
 
                         // 参考 SOMCP：仅当隧道已连接时才触发保活重启
                         if (connected.get() && downElapsed >= HEALTH_CHECK_DOWN_THRESHOLD_MS) {
@@ -590,7 +590,7 @@ public class CloudflareTunnelClient {
                                 healthCheckLastRestartAt = lastRestartAt;
                                 keepaliveRestarts.incrementAndGet();
                                 fireLog("[健康检查] 端口持续不可达，触发生保活重启 (距上次重启 " + (sinceLastRestart / 1000) + " 秒)");
-                                fireError("MCP Server 端口 " + localPort + " 持续不可达，触发隧道保活重启");
+                                fireError("本地服务端口 " + localPort + " 持续不可达，触发隧道保活重启");
                                 // 参考 SOMCP：使用 startInternal 风格的重新启动
                                 // 这里通过 stop() + start() 实现重启，generation 会递增，旧健康线程会退出
                                 stop();

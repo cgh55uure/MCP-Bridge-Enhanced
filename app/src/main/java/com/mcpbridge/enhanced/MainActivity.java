@@ -32,7 +32,6 @@ import com.google.android.material.textfield.TextInputLayout;
 import com.mcpbridge.enhanced.floatwindow.FloatWindowService;
 import com.mcpbridge.enhanced.floatwindow.FloatWindowSettingActivity;
 import com.mcpbridge.enhanced.keepalive.KeepAliveManager;
-import com.mcpbridge.enhanced.server.McpServer;
 import com.mcpbridge.enhanced.tunnel.TunnelService;
 import com.mcpbridge.enhanced.tunnel.cloudflare.CloudflareTunnelActivity;
 import com.mcpbridge.enhanced.tunnel.cloudflare.CloudflareTunnelService;
@@ -44,7 +43,7 @@ public class MainActivity extends AppCompatActivity {
     private TextInputEditText etBoreHost, etLocalPort;
     private TextInputLayout tilBoreHost, tilLocalPort;
     private MaterialButton btnConnect, btnDisconnect, btnFloatSetting, btnCloudflare, btnClearLog;
-    private TextView tvStatus, tvStatusIndicator, tvTunnelUrl, tvTunnelType, tvEventLog, tvMcpServerStatus;
+    private TextView tvStatus, tvStatusIndicator, tvTunnelUrl, tvTunnelType, tvEventLog;
     private MaterialCardView cardEventLog;
     private ChipGroup chipTunnelMode;
     private boolean isTempTunnel = true;
@@ -112,7 +111,7 @@ public class MainActivity extends AppCompatActivity {
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayShowTitleEnabled(false);
         }
-        toolbar.setTitle("MCP Bridge");
+        toolbar.setTitle("隧道桥接");
 
         initViews();
         loadSavedInput();
@@ -127,10 +126,6 @@ public class MainActivity extends AppCompatActivity {
         etLocalPort.setOnFocusChangeListener((v, hasFocus) -> {
             if (!hasFocus) saveInput();
         });
-        // 初始化 MCP Server 状态显示
-        updateMcpServerStatus();
-        // 启动定时 MCP 状态检测（每 3 秒 TCP 探活一次）
-        startMcpHealthCheck();
 
         // 在后台线程执行非关键初始化（保活服务等），避免阻塞主线程渲染
         new Thread(() -> {
@@ -166,6 +161,14 @@ public class MainActivity extends AppCompatActivity {
                 .putString(KEY_SAVED_PORT, port)
                 .putBoolean(KEY_SAVED_MODE, isTempTunnel)
                 .apply();
+        // 同步保存到 tunnel 配置，确保悬浮窗和保活使用最新设置
+        int localPort;
+        try {
+            localPort = Integer.parseInt(port);
+        } catch (NumberFormatException e) {
+            localPort = 8080;
+        }
+        KeepAliveManager.getInstance(this).saveTunnelConfig(host, localPort);
     }
 
     private void loadSavedInput() {
@@ -209,7 +212,6 @@ public class MainActivity extends AppCompatActivity {
         tvTunnelUrl = findViewById(R.id.tvTunnelUrl);
         tvTunnelType = findViewById(R.id.tvTunnelType);
         tvEventLog = findViewById(R.id.tvEventLog);
-        tvMcpServerStatus = findViewById(R.id.tvMcpServerStatus);
         cardEventLog = findViewById(R.id.cardEventLog);
         chipTunnelMode = findViewById(R.id.chipTunnelMode);
         chipLogBore = findViewById(R.id.chipLogBore);
@@ -346,8 +348,6 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(tunnelStatusReceiver);
-        // 停止定时 MCP 状态检测
-        mcpHealthHandler.removeCallbacks(mcpHealthRunnable);
     }
 
     @Override
@@ -401,8 +401,6 @@ public class MainActivity extends AppCompatActivity {
         tvTunnelType.setText("Bore");
         tvStatus.setText("连接中...");
         appendBoreEvent("正在启动隧道 " + host + ":" + localPort + "...");
-        // MCP Server 将在 TunnelService 中启动，这里延迟更新状态
-        uiHandler.postDelayed(this::updateMcpServerStatus, 1000);
     }
 
     private void disconnectTunnel() {
@@ -412,7 +410,6 @@ public class MainActivity extends AppCompatActivity {
         isConnected = false;
         updateTunnelStatus(false, null);
         appendBoreEvent("隧道已断开");
-        uiHandler.postDelayed(this::updateMcpServerStatus, 500);
     }
 
     
@@ -428,7 +425,7 @@ public class MainActivity extends AppCompatActivity {
             btnConnect.setEnabled(false);
             btnDisconnect.setEnabled(true);
             if (url != null) {
-                tvTunnelUrl.setText("公网地址: http://" + url);
+                tvTunnelUrl.setText("公网地址: " + url);
                 tvTunnelUrl.setVisibility(android.view.View.VISIBLE);
             }
         } else {
@@ -443,37 +440,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 更新 MCP Server 状态显示（使用 TCP 探活，参考 SOMCP 方案）
+     * 启动定时状态检测（每 3 秒刷新一次）
      */
-    private void updateMcpServerStatus() {
-        McpServer mcpServer = McpServer.getInstance();
-        // 使用 TCP 探活检测 MCP Server 是否真正可达
-        boolean mcpRunning = McpServer.probeRunning();
-        if (tvMcpServerStatus != null) {
-            if (mcpRunning) {
-                tvMcpServerStatus.setText("✓ MCP Server 运行中 (端口: " + mcpServer.getPort() + ")");
-                tvMcpServerStatus.setTextColor(getColor(R.color.status_connected));
-            } else {
-                tvMcpServerStatus.setText("MCP Server 未启动（启动隧道后自动启动）");
-                tvMcpServerStatus.setTextColor(getColor(R.color.status_disconnected));
-            }
-        }
+    private void startStatusCheck() {
+        statusHandler.removeCallbacks(statusRunnable);
+        statusHandler.postDelayed(statusRunnable, 3000);
     }
 
-    /**
-     * 启动定时 MCP 状态检测（每 3 秒刷新一次）
-     */
-    private void startMcpHealthCheck() {
-        mcpHealthHandler.removeCallbacks(mcpHealthRunnable);
-        mcpHealthHandler.postDelayed(mcpHealthRunnable, 3000);
-    }
-
-    private final Handler mcpHealthHandler = new Handler(Looper.getMainLooper());
-    private final Runnable mcpHealthRunnable = new Runnable() {
+    private final Handler statusHandler = new Handler(Looper.getMainLooper());
+    private final Runnable statusRunnable = new Runnable() {
         @Override
         public void run() {
-            updateMcpServerStatus();
-            mcpHealthHandler.postDelayed(this, 3000);
+            statusHandler.postDelayed(this, 3000);
         }
     };
 

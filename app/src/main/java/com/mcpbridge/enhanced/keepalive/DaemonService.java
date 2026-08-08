@@ -49,7 +49,7 @@ public class DaemonService extends Service {
         );
 
         return new NotificationCompat.Builder(this, MCPBridgeApp.CHANNEL_DAEMON)
-                .setContentTitle("MCP Bridge 守护")
+                .setContentTitle("隧道桥接 守护")
                 .setContentText("守护进程正在运行")
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
                 .setContentIntent(pendingIntent)

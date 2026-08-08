@@ -97,7 +97,7 @@ public class DoubleProcessKeepAlive extends Service {
         );
 
         return new NotificationCompat.Builder(this, MCPBridgeApp.CHANNEL_DAEMON)
-                .setContentTitle("MCP Bridge 双进程守护")
+                .setContentTitle("隧道桥接 双进程守护")
                 .setContentText("守护进程运行中")
                 .setSmallIcon(android.R.drawable.ic_popup_reminder)
                 .setContentIntent(pendingIntent)

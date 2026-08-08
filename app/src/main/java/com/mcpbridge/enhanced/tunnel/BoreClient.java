@@ -280,7 +280,7 @@ public class BoreClient {
                 cancelConnectTimeout();
 
                 // 启动本地端口健康检查（参考 CloudflareTunnelClient 的 startHealthCheck 方案）
-                // 每 5 秒探测一次 MCP Server 端口，确保服务可达
+                // 每 5 秒探测一次本地服务端口，确保服务可达
                 startHealthCheck();
 
                 if (listener != null) {
@@ -584,7 +584,7 @@ public class BoreClient {
 
     /**
      * 启动本地端口健康检查（参考 CloudflareTunnelClient 的 startHealthCheck 方案）。
-     * 每 5 秒探测一次 MCP Server 本地端口，检测服务是否可达。
+     * 每 5 秒探测一次本地端口，检测服务是否可达。
      *
      * 防抖逻辑（参考 SOMCP）：
      * - 连续失败超过 8 秒才触发保活重启
@@ -621,14 +621,14 @@ public class BoreClient {
                         if (!healthCheckPassed) {
                             healthCheckPassed = true;
                             healthCheckDownSince = 0L;
-                            fireEvent(now() + " [健康检查] MCP Server 端口 " + localPort + " 可达 ✓");
+                            fireEvent(now() + " [健康检查] 本地服务端口 " + localPort + " 可达 ✓");
                         }
                     } else {
                         healthCheckPassed = false;
                         if (downSince == 0L) downSince = System.currentTimeMillis();
                         healthCheckDownSince = downSince;
                         long downElapsed = System.currentTimeMillis() - downSince;
-                        fireEvent(now() + " [健康检查] MCP Server 端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
+                        fireEvent(now() + " [健康检查] 本地服务端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
 
                         // 仅当隧道已连接时才触发保活重启
                         if (running && downElapsed >= HEALTH_CHECK_DOWN_THRESHOLD_MS) {

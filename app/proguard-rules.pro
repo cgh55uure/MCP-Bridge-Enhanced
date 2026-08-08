@@ -1,4 +1,4 @@
-# MCP Bridge Enhanced ProGuard Rules
+# 隧道桥接 ProGuard Rules
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
 

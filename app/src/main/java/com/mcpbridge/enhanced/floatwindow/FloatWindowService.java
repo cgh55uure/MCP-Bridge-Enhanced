@@ -114,7 +114,7 @@ public class FloatWindowService extends Service {
         }
 
         return new NotificationCompat.Builder(this, MCPBridgeApp.CHANNEL_FLOAT)
-                .setContentTitle("MCP Bridge 悬浮窗")
+                .setContentTitle("隧道桥接 悬浮窗")
                 .setContentText(statusText)
                 .setSmallIcon(android.R.drawable.ic_menu_info_details)
                 .setContentIntent(pendingIntent)

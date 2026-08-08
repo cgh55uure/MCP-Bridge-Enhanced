@@ -62,7 +62,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="悬浮窗会显示 MCP 隧道连接状态和公网地址"
+        android:text="悬浮窗会显示隧道连接状态和公网地址"
         android:textSize="12sp"
         android:textColor="?attr/colorOnSurfaceVariant" />
 

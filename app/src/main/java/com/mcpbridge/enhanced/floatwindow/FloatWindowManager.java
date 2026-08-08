@@ -21,7 +21,6 @@ import android.widget.Toast;
 
 import com.mcpbridge.enhanced.R;
 import com.mcpbridge.enhanced.keepalive.KeepAliveManager;
-import com.mcpbridge.enhanced.server.McpServer;
 import com.mcpbridge.enhanced.tunnel.TunnelService;
 import com.mcpbridge.enhanced.tunnel.cloudflare.CloudflareTunnelService;
 
@@ -257,35 +256,12 @@ public class FloatWindowManager {
                 cfConnected, cfUrl, false
         );
 
-        // ---- MCP Server 状态 ----
-        updateMcpStatus();
-    }
-
-    private void updateMcpStatus() {
-        if (floatView == null) return;
-        McpServer mcpServer = McpServer.getInstance();
-        // 使用 TCP 探活检测 MCP Server 是否真正可达（参考 SOMCP 方案）
-        boolean mcpRunning = McpServer.probeRunning();
-        int mcpPort = mcpServer.getPort();
-
-        TextView tvMcpStatus = floatView.findViewById(R.id.tvMcpStatus);
-        TextView tvMcpInfo = floatView.findViewById(R.id.tvMcpInfo);
-
-        if (tvMcpStatus != null) {
-            setDrawableColor(tvMcpStatus, mcpRunning ? R.color.status_connected : R.color.status_disconnected);
-        }
-        if (tvMcpInfo != null) {
-            if (mcpRunning) {
-                tvMcpInfo.setText("运行中 :" + mcpPort + "  ✓");
-            } else {
-                tvMcpInfo.setText("未启动（启动隧道后自动启动）");
-            }
-        }
+        // ---- 隧道状态（纯内网穿透） ----
     }
 
     /**
-     * 启动定时健康检查（每 3 秒检测一次 MCP Server 和隧道状态）。
-     * 参考 SOMCP 的 health check 方案，确保状态及时更新。
+     * 启动定时健康检查（每 3 秒检测一次隧道状态）。
+     * 确保状态及时更新。
      */
     public void startHealthCheck() {
         healthCheckHandler.removeCallbacks(healthCheckRunnable);
@@ -345,7 +321,7 @@ public class FloatWindowManager {
 
         if (tvUrl != null) {
             if (connected && url != null) {
-                tvUrl.setText("http://" + url);
+                tvUrl.setText(url);
                 tvUrl.setVisibility(View.VISIBLE);
             } else {
                 tvUrl.setVisibility(View.GONE);
@@ -355,7 +331,7 @@ public class FloatWindowManager {
         if (tvCopy != null) {
             if (connected && url != null) {
                 tvCopy.setVisibility(View.VISIBLE);
-                final String fullUrl = "http://" + url;
+                final String fullUrl = url;
                 tvCopy.setOnClickListener(v -> {
                     ClipboardManager cm = (ClipboardManager) context.getSystemService(Context.CLIPBOARD_SERVICE);
                     cm.setPrimaryClip(ClipData.newPlainText("tunnel_url", fullUrl));
