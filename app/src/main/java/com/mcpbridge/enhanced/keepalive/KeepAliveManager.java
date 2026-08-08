@@ -65,11 +65,8 @@ public class KeepAliveManager {
     }
 
     /**
-     * 检查并重启服务（保活用：服务被系统杀死后重启，不是应用启动时自启动）
-     * 隧道客户端内部已有自动重连逻辑（掉线后自动重连），这里只处理服务进程被杀的情况
-     *
-     * 关键：仅当用户之前主动启动过隧道（tunnel_user_started=true）才重启，
-     * 避免用户从未启动过的隧道被保活机制自动拉起。
+     * 检查并重启服务（保活用：仅当用户主动启动过且进程存活时重启隧道）
+     * 隧道在后台被系统杀死时会自动重启，但用户划掉后台（进程被杀）后不会自启动。
      */
     public void checkAndRestart() {
         // 检查 TunnelService (Bore) — 仅当用户主动启动过且被系统杀死时重启
@@ -158,17 +155,11 @@ public class KeepAliveManager {
 
     // ===== 用户主动启动标记（用于区分自启动和保活重启） =====
     //
-    // 参考 SOMCP 方案：使用 volatile 内存标记作为当前会话的启动状态，
-    // 持久化标记仅用于记录用户"曾经"启动过，不用于保活判断。
-    //
     // 保活判断逻辑：只有内存标记为 true 时才重启隧道。
     // 这意味着：
     //   1. 用户在当前会话中启动过隧道 → 保活可以重启
     //   2. App 进程被系统杀死后重启 → 内存标记丢失 → 保活不会自动重启
-    //   3. 用户再次主动点击启动 → 内存标记重新设置 → 保活恢复
-    //
-    // 这样既保证了"用户主动启动的隧道在运行中不会被系统杀死"，
-    // 又避免了"用户打开 app 发现隧道自己启动了"的问题。
+    //   3. 用户主动退出（back/划掉）→ onDestroy 中会清除标记 → 保活不会重启
 
     private static final String PREF_TUNNEL_STARTED = "tunnel_user_started";
     private static final String PREF_CF_TUNNEL_STARTED = "cf_tunnel_user_started";
@@ -182,17 +173,15 @@ public class KeepAliveManager {
      * @param started true=用户主动启动, false=用户主动停止
      */
     public void setTunnelUserStarted(boolean started) {
-        // 持久化标记（用于 UI 显示历史状态）
         context.getSharedPreferences("tunnel", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_TUNNEL_STARTED, started)
                 .apply();
-        // 会话标记（用于保活判断，app 重启后自动失效）
         sessionTunnelStarted = started;
     }
 
     /**
-     * 检查 Bore 隧道是否曾被用户主动启动过（当前会话）
+     * 检查 Bore 隧道是否已被用户主动启动（当前会话）
      */
     public boolean isTunnelUserStarted() {
         return sessionTunnelStarted;
@@ -211,7 +200,7 @@ public class KeepAliveManager {
     }
 
     /**
-     * 检查 CF 隧道是否曾被用户主动启动过（当前会话）
+     * 检查 CF 隧道是否已被用户主动启动（当前会话）
      */
     public boolean isCfTunnelUserStarted() {
         return sessionCfTunnelStarted;
@@ -222,6 +211,15 @@ public class KeepAliveManager {
                 .edit()
                 .putString("bore_host", host)
                 .putInt("local_port", localPort)
+                .apply();
+    }
+
+    public void saveCfTunnelConfig(String mode, int localPort, String token) {
+        context.getSharedPreferences("cf_tunnel", Context.MODE_PRIVATE)
+                .edit()
+                .putString("cf_mode", mode)
+                .putInt("cf_local_port", localPort)
+                .putString("cf_token", token != null ? token : "")
                 .apply();
     }
 
@@ -238,15 +236,6 @@ public class KeepAliveManager {
     private int getLocalPort() {
         return context.getSharedPreferences("tunnel", Context.MODE_PRIVATE)
                 .getInt("local_port", 8080);
-    }
-
-    public void saveCfTunnelConfig(String mode, int localPort, String token) {
-        context.getSharedPreferences("cf_tunnel", Context.MODE_PRIVATE)
-                .edit()
-                .putString("cf_mode", mode)
-                .putInt("cf_local_port", localPort)
-                .putString("cf_token", token != null ? token : "")
-                .apply();
     }
 
     private boolean hasCfTunnelConfig() {

@@ -258,17 +258,22 @@
                     android:padding="20dp">
 
                     <LinearLayout
+                        android:id="@+id/llLogHeader"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
+                        android:clickable="true"
+                        android:focusable="true"
+                        android:background="?attr/selectableItemBackground"
                         android:layout_marginBottom="4dp">
 
                         <TextView
+                            android:id="@+id/tvLogTitle"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:text="运行日志"
+                            android:text="▶ 运行日志"
                             android:textSize="14sp"
                             android:textColor="?attr/colorOnSurfaceVariant"
                             android:textStyle="bold" />
@@ -286,51 +291,59 @@
                     </LinearLayout>
 
                     <LinearLayout
+                        android:id="@+id/llLogContent"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="8dp">
+                        android:orientation="vertical"
+                        android:visibility="gone">
 
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipLogBore"
-                            android:layout_width="wrap_content"
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="Bore"
-                            android:textSize="12sp"
-                            android:checked="true"
-                            style="@style/Widget.Material3.Chip.Assist" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="8dp">
 
-                        <com.google.android.material.chip.Chip
-                            android:id="@+id/chipLogCf"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="CF"
-                            android:textSize="12sp"
-                            style="@style/Widget.Material3.Chip.Assist" />
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipLogBore"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="Bore"
+                                android:textSize="12sp"
+                                android:checked="true"
+                                style="@style/Widget.Material3.Chip.Assist" />
+
+                            <com.google.android.material.chip.Chip
+                                android:id="@+id/chipLogCf"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="CF"
+                                android:textSize="12sp"
+                                style="@style/Widget.Material3.Chip.Assist" />
+
+                            <TextView
+                                android:id="@+id/tvLogSource"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text=""
+                                android:textSize="11sp"
+                                android:textColor="?attr/colorOnSurfaceVariant"
+                                android:layout_marginStart="8dp" />
+                        </LinearLayout>
 
                         <TextView
-                            android:id="@+id/tvLogSource"
-                            android:layout_width="wrap_content"
+                            android:id="@+id/tvEventLog"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:text=""
                             android:textSize="11sp"
                             android:textColor="?attr/colorOnSurfaceVariant"
-                            android:layout_marginStart="8dp" />
+                            android:fontFamily="monospace"
+                            android:lineSpacingExtra="2dp"
+                            android:padding="12dp"
+                            android:background="@drawable/log_background"
+                            android:minHeight="80dp" />
                     </LinearLayout>
-
-                    <TextView
-                        android:id="@+id/tvEventLog"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text=""
-                        android:textSize="11sp"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:fontFamily="monospace"
-                        android:lineSpacingExtra="2dp"
-                        android:padding="12dp"
-                        android:background="@drawable/log_background"
-                        android:minHeight="80dp" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 

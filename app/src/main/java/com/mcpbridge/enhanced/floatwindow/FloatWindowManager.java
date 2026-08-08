@@ -223,12 +223,17 @@ public class FloatWindowManager {
     }
 
     private void updatePanelView() {
-        if (floatView == null || !isExpanded) return;
+        updatePanelView(
+            TunnelService.isRunning(context),
+            TunnelService.getTunnelUrl(context),
+            CloudflareTunnelService.isRunning(context),
+            CloudflareTunnelService.getTunnelUrl(context)
+        );
+    }
 
-        boolean boreConnected = TunnelService.isRunning(context);
-        String boreUrl = TunnelService.getTunnelUrl(context);
-        boolean cfConnected = CloudflareTunnelService.isRunning(context);
-        String cfUrl = CloudflareTunnelService.getTunnelUrl(context);
+    private void updatePanelView(boolean boreConnected, String boreUrl,
+                                  boolean cfConnected, String cfUrl) {
+        if (floatView == null || !isExpanded) return;
 
         boolean anyConnected = boreConnected || cfConnected;
 

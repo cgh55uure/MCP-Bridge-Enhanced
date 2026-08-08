@@ -14,6 +14,8 @@ import android.os.Looper;
 import android.os.PowerManager;
 import android.provider.Settings;
 import android.text.TextUtils;
+import android.widget.LinearLayout;
+import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -43,8 +45,9 @@ public class MainActivity extends AppCompatActivity {
     private TextInputEditText etBoreHost, etLocalPort;
     private TextInputLayout tilBoreHost, tilLocalPort;
     private MaterialButton btnConnect, btnDisconnect, btnFloatSetting, btnCloudflare, btnClearLog;
-    private TextView tvStatus, tvStatusIndicator, tvTunnelUrl, tvTunnelType, tvEventLog;
+    private TextView tvStatus, tvStatusIndicator, tvTunnelUrl, tvTunnelType, tvEventLog, tvLogTitle;
     private MaterialCardView cardEventLog;
+    private LinearLayout llLogHeader, llLogContent;
     private ChipGroup chipTunnelMode;
     private boolean isTempTunnel = true;
 
@@ -54,6 +57,8 @@ public class MainActivity extends AppCompatActivity {
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private static final int MAX_LOG_LENGTH = 20000;
     private boolean showingBoreLog = true;
+    private boolean keepAliveInitialized = false;
+    private boolean isLogExpanded = false;
 
     private com.google.android.material.chip.Chip chipLogBore, chipLogCf;
     private TextView tvLogSource;
@@ -127,29 +132,47 @@ public class MainActivity extends AppCompatActivity {
             if (!hasFocus) saveInput();
         });
 
-        // 在后台线程执行非关键初始化（保活服务等），避免阻塞主线程渲染
+        // 轻量级检查：仅读取 SharedPreferences 判断隧道状态，不影响 UI 渲染
+        checkTunnelStatus();
+
+        // 保活服务等重型初始化延迟到界面渲染完成后执行
+        uiHandler.postDelayed(this::initKeepAlive, 500);
+    }
+
+    /**
+     * 界面渲染后执行重型初始化（保活服务、悬浮窗等）
+     * 延迟执行，避免阻塞 UI 渲染
+     */
+    private void initKeepAlive() {
+        if (keepAliveInitialized) return;
+        keepAliveInitialized = true;
         new Thread(() -> {
             KeepAliveManager.getInstance(this).start();
+        }).start();
+    }
 
-            // 检查 Bore 隧道状态
-            if (TunnelService.isRunning(this)) {
-                isConnected = true;
-                uiHandler.post(() -> updateTunnelStatus(true, TunnelService.getTunnelUrl(this)));
-                List<String> savedLog = TunnelService.getEventLog();
-                if (savedLog != null && !savedLog.isEmpty()) {
-                    for (String event : savedLog) {
-                        uiHandler.post(() -> appendBoreEvent(event));
-                    }
+    /**
+     * 轻量级检查隧道状态，仅读取 SharedPreferences，不启动任何服务
+     */
+    private void checkTunnelStatus() {
+        // 检查 Bore 隧道状态
+        if (TunnelService.isRunning(this)) {
+            isConnected = true;
+            uiHandler.post(() -> updateTunnelStatus(true, TunnelService.getTunnelUrl(this)));
+            List<String> savedLog = TunnelService.getEventLog();
+            if (savedLog != null && !savedLog.isEmpty()) {
+                for (String event : savedLog) {
+                    uiHandler.post(() -> appendBoreEvent(event));
                 }
             }
+        }
 
-            // 检查 Cloudflare 隧道状态（日志记录到 CF 日志）
-            if (CloudflareTunnelService.isRunning(this)) {
-                uiHandler.post(() -> appendCfEvent("Cloudflare 隧道运行中: " +
-                        (CloudflareTunnelService.getTunnelUrl(this) != null ?
-                                CloudflareTunnelService.getTunnelUrl(this) : "等待连接")));
-            }
-        }).start();
+        // 检查 Cloudflare 隧道状态（日志记录到 CF 日志）
+        if (CloudflareTunnelService.isRunning(this)) {
+            uiHandler.post(() -> appendCfEvent("Cloudflare 隧道运行中: " +
+                    (CloudflareTunnelService.getTunnelUrl(this) != null ?
+                            CloudflareTunnelService.getTunnelUrl(this) : "等待连接")));
+        }
     }
 
     private void saveInput() {
@@ -217,6 +240,9 @@ public class MainActivity extends AppCompatActivity {
         chipLogBore = findViewById(R.id.chipLogBore);
         chipLogCf = findViewById(R.id.chipLogCf);
         tvLogSource = findViewById(R.id.tvLogSource);
+        tvLogTitle = findViewById(R.id.tvLogTitle);
+        llLogHeader = findViewById(R.id.llLogHeader);
+        llLogContent = findViewById(R.id.llLogContent);
     }
 
     private void setupListeners() {
@@ -286,6 +312,9 @@ public class MainActivity extends AppCompatActivity {
                 switchToCfLog();
             }
         });
+
+        // 运行日志折叠/展开
+        llLogHeader.setOnClickListener(v -> toggleLogVisibility());
     }
 
     private void checkPermissions() {
@@ -348,6 +377,24 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(tunnelStatusReceiver);
+        // 用户主动退出（back/划掉后台）时停止隧道并清除启动标记，
+        // 避免下次进入时保活系统自动重启隧道
+        if (isFinishing()) {
+            stopTunnelsOnExit();
+        }
+    }
+
+    /**
+     * 用户退出时停止所有隧道并清除标记，防止下次进入时自启动
+     */
+    private void stopTunnelsOnExit() {
+        // 停止 Bore 隧道，清除启动标记（保活系统不会再重启）
+        KeepAliveManager.getInstance(this).setTunnelUserStarted(false);
+        stopService(new Intent(this, TunnelService.class));
+
+        // 停止 CF 隧道，清除启动标记
+        KeepAliveManager.getInstance(this).setCfTunnelUserStarted(false);
+        stopService(new Intent(this, CloudflareTunnelService.class));
     }
 
     @Override
@@ -456,6 +503,13 @@ public class MainActivity extends AppCompatActivity {
     };
 
     // ===== 日志分离 =====
+
+    /** 切换运行日志的折叠/展开状态 */
+    private void toggleLogVisibility() {
+        isLogExpanded = !isLogExpanded;
+        llLogContent.setVisibility(isLogExpanded ? View.VISIBLE : View.GONE);
+        tvLogTitle.setText(isLogExpanded ? "▼ 运行日志" : "▶ 运行日志");
+    }
 
     /** 追加 Bore 日志并自动切换到 Bore 日志视图 */
     private void appendBoreEvent(String event) {

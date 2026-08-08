@@ -10,8 +10,8 @@ android {
         applicationId = "com.mcpbridge.enhanced"
         minSdk = 24
         targetSdk = 34
-        versionCode = 25
-        versionName = "2.1.25"
+        versionCode = 26
+        versionName = "2.1.26"
     }
 
     signingConfigs {

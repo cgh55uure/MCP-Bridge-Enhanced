@@ -155,6 +155,8 @@ public class CloudflareTunnelService extends Service {
                 .edit()
                 .putBoolean(PREF_CF_RUNNING, false)
                 .apply();
+        // 发送断开广播，通知悬浮窗和主界面状态变更
+        broadcastStatus(false, null);
         super.onDestroy();
     }
 

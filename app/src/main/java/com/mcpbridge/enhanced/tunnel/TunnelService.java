@@ -176,6 +176,8 @@ public class TunnelService extends Service {
                 .putBoolean(PREF_TUNNEL_RUNNING, false)
                 .apply();
         lastTunnelUrl = null;
+        // 发送断开广播，通知悬浮窗和主界面状态变更
+        broadcastStatus(false, null);
     }
 
     private Notification buildNotification(String content) {
