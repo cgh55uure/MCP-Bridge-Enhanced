@@ -41,6 +41,9 @@ public class McpServer {
 
     private static volatile McpServer instance;
     private static final Object lock = new Object();
+    // 引用计数：跟踪有多少隧道正在使用 MCP Server
+    // 隧道启动时 acquire()，停止时 release()，计数归零才真正 stop()
+    private static final java.util.concurrent.atomic.AtomicInteger referenceCount = new java.util.concurrent.atomic.AtomicInteger(0);
 
     private final int port;
     private final String host;
@@ -176,6 +179,58 @@ public class McpServer {
             instance = new McpServer(newPort);
         }
         return instance.start();
+    }
+
+    /**
+     * 隧道获取 MCP Server 引用。
+     * 拥塞 MCP Server 到指定端口并返回是否成功。
+     * 参考 SOMCP 方案：引用计数管理，防止一个隧道停止时误杀另一个隧道使用的 MCP Server。
+     *
+     * @param port 隧道需要的端口
+     * @return true 表示 MCP Server 已就绪
+     */
+    public static boolean acquire(int port) {
+        synchronized (lock) {
+            if (instance == null) {
+                instance = new McpServer(port);
+            } else if (instance.port != port) {
+                // 端口不同，需要重启
+                instance.stop();
+                instance = new McpServer(port);
+            } else if (instance.isRunning()) {
+                // 已在运行且端口正确，增加引用计数
+                referenceCount.incrementAndGet();
+                return true;
+            }
+            boolean started = instance.start();
+            if (started) {
+                referenceCount.incrementAndGet();
+            }
+            return started;
+        }
+    }
+
+    /**
+     * 隧道释放 MCP Server 引用。
+     * 仅当所有隧道都释放后才真正停止 MCP Server。
+     */
+    public static void release() {
+        synchronized (lock) {
+            int count = referenceCount.decrementAndGet();
+            if (count <= 0) {
+                referenceCount.set(0);
+                if (instance != null) {
+                    instance.stop();
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取当前引用计数
+     */
+    public static int getReferenceCount() {
+        return referenceCount.get();
     }
 
     public long getUptimeMillis() {

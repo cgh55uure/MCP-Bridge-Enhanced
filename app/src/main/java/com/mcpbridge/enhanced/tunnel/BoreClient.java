@@ -68,6 +68,9 @@ public class BoreClient {
     private Thread reconnectThread;
     private volatile boolean stopRequested = false;
 
+    // 参考 SOMCP 方案：generation 并发控制
+    private final AtomicInteger generation = new AtomicInteger(0);
+
     public BoreClient(String boreHost, int localPort) {
         this(parseHost(boreHost), parsePort(boreHost, DEFAULT_BORE_PORT), localPort, parseSecret(boreHost));
     }
@@ -134,12 +137,23 @@ public class BoreClient {
 
     public synchronized void start() {
         if (running) return;
+        // 参考 SOMCP 方案：重置门控状态，递增 generation
+        stopRequested = false;
+        generation.incrementAndGet();
         running = true;
         reconnectAttempts.set(0);
+
+        final int runGeneration = generation.get();
 
         tunnelThread = new Thread(() -> {
             Socket controlSocket = null;
             stopRequested = false;
+
+            // 参考 SOMCP 方案：generation 检查 — 启动后可能已被 stop()
+            if (generation.get() != runGeneration || stopRequested) {
+                running = false;
+                return;
+            }
 
             try {
                 fireEvent(now() + " 正在连接 " + boreHost + ":" + borePort + "...");
@@ -239,6 +253,8 @@ public class BoreClient {
 
                 // 控制通道循环：读取 JSON 消息
                 while (running && !controlSocket.isClosed()) {
+                    // 参考 SOMCP 方案：generation 检查
+                    if (generation.get() != runGeneration || stopRequested) break;
                     String msg;
                     try {
                         msg = readJsonMessage(controlIn);
@@ -310,6 +326,7 @@ public class BoreClient {
         int attempts = reconnectAttempts.incrementAndGet();
         int delay = Math.min(RECONNECT_DELAY_MS * (1 << (attempts - 1)), 30000);
         fireEvent(now() + " 将在 " + (delay / 1000) + " 秒后自动重连 (第 " + attempts + "/" + MAX_RECONNECT_ATTEMPTS + " 次)");
+        final int reconnectGeneration = generation.get();
         reconnectThread = new Thread(() -> {
             try {
                 Thread.sleep(delay);
@@ -317,6 +334,8 @@ public class BoreClient {
                 return;
             }
             if (running) return;
+            // 参考 SOMCP 方案：generation 检查 — 重连前可能已被 stop()
+            if (generation.get() != reconnectGeneration || stopRequested) return;
             fireEvent(now() + " 开始自动重连...");
             start();
         }, "bore-reconnect");
@@ -517,10 +536,25 @@ public class BoreClient {
         }
     }
 
+    /**
+     * 参考 SOMCP 方案：轻量级停止请求，从主线程同步设置 stopRequested，
+     * 防止在 stop() 实际执行前有重连线程重新进入 start()。
+     */
+    public void requestStop() {
+        stopRequested = true;
+        generation.incrementAndGet();
+        autoReconnect = false;
+        if (reconnectThread != null) {
+            reconnectThread.interrupt();
+            reconnectThread = null;
+        }
+    }
+
     public synchronized void stop() {
         autoReconnect = false;
         running = false;
         stopRequested = true;
+        generation.incrementAndGet();
         if (reconnectThread != null) {
             reconnectThread.interrupt();
             reconnectThread = null;

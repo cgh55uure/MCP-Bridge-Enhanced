@@ -28,6 +28,8 @@ public class CloudflareTunnelService extends Service {
             "com.mcpbridge.enhanced.CF_TUNNEL_STATUS";
     public static final String ACTION_CF_EVENT =
             "com.mcpbridge.enhanced.CF_TUNNEL_EVENT";
+    public static final String ACTION_STOP =
+            "com.mcpbridge.enhanced.cftunnel.STOP";
 
     private static final String EXTRA_MODE = "cf_mode";
     private static final String EXTRA_LOCAL_PORT = "cf_local_port";
@@ -46,6 +48,15 @@ public class CloudflareTunnelService extends Service {
             return START_NOT_STICKY;
         }
 
+        // 参考 SOMCP 方案：处理 ACTION_STOP，先 requestStop 防止重连
+        String action = intent.getAction();
+        if (ACTION_STOP.equals(action)) {
+            requestStop();
+            stopForeground(STOP_FOREGROUND_REMOVE);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         String modeStr = intent.getStringExtra(EXTRA_MODE);
         int localPort = intent.getIntExtra(EXTRA_LOCAL_PORT, 8080);
         String token = intent.getStringExtra(EXTRA_TOKEN);
@@ -55,10 +66,8 @@ public class CloudflareTunnelService extends Service {
         startForeground(2001, buildNotification("Cloudflare 隧道启动中..."));
         broadcastEvent("正在启动 Cloudflare 隧道...");
 
-        // 强制重启 MCP Server 到隧道配置的端口
-        // 确保端口与隧道设置一致，即使之前已被其他隧道启动
-        McpServer mcpServer = McpServer.getInstance();
-        boolean mcpStarted = mcpServer.restart(localPort);
+        // 使用引用计数方式获取 MCP Server（防止一个隧道停止时误杀另一个隧道的使用）
+        boolean mcpStarted = McpServer.acquire(localPort);
         broadcastEvent("[MCP] 本地 MCP Server " + (mcpStarted ? "已启动" : "启动失败") + " (端口: " + localPort + ")");
 
         if (isPermanent && token != null && !token.isEmpty()) {
@@ -131,14 +140,24 @@ public class CloudflareTunnelService extends Service {
         return null;
     }
 
+    /**
+     * 参考 SOMCP 方案：轻量级停止请求，从主线程同步设置停止标志，
+     * 防止在 onDestroy 执行前有保活/重连线程重新进入 start。
+     */
+    public void requestStop() {
+        if (client != null) {
+            client.requestStop();
+        }
+    }
+
     @Override
     public void onDestroy() {
         if (client != null) {
             client.stop();
             client = null;
         }
-        // 停止 MCP Server，释放端口供其他隧道使用
-        McpServer.getInstance().stop();
+        // 释放 MCP Server 引用（仅当所有隧道都释放后才真正停止）
+        McpServer.release();
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_CF_RUNNING, false)
@@ -154,8 +173,8 @@ public class CloudflareTunnelService extends Service {
             client.forceStop();
             client = null;
         }
-        // 停止 MCP Server，释放端口供其他隧道使用
-        McpServer.getInstance().stop();
+        // 释放 MCP Server 引用（仅当所有隧道都释放后才真正停止）
+        McpServer.release();
         // 清除运行状态
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()

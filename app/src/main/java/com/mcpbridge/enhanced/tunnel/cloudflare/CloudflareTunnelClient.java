@@ -92,6 +92,10 @@ public class CloudflareTunnelClient {
     private final Object lock = new Object();
     private Runnable pendingReconnectRunnable; // 跟踪待处理的重连，用于取消
 
+    // 参考 SOMCP 方案：generation 并发控制 + stopRequested 硬门控
+    private final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger(0);
+    @Volatile private boolean stopRequested = false;
+
     // URL 匹配模式
     private static final Pattern URL_PATTERN =
             Pattern.compile("https?://[a-zA-Z0-9][-a-zA-Z0-9]*\\.trycloudflare\\.com");
@@ -122,6 +126,9 @@ public class CloudflareTunnelClient {
 
     public synchronized void start() {
         if (running.get()) return;
+        // 参考 SOMCP 方案：重置门控状态，递增 generation
+        stopRequested = false;
+        generation.incrementAndGet();
         // 取消任何待处理的重连
         cancelPendingReconnect();
         running.set(true);
@@ -132,6 +139,14 @@ public class CloudflareTunnelClient {
     }
 
     private void startInternal() {
+        final int runGeneration = generation.get();
+
+        // 参考 SOMCP 方案：startInternal 入口检查 stopRequested 和 generation
+        if (stopRequested || generation.get() != runGeneration) {
+            running.set(false);
+            return;
+        }
+
         // 防止并发执行
         synchronized (lock) {
             if (tunnelProcess != null && tunnelProcess.isAlive()) {
@@ -154,6 +169,13 @@ public class CloudflareTunnelClient {
                 fireLog("cloudflared 下载完成: " + cloudflaredPath);
             } else {
                 fireLog("找到 cloudflared: " + cloudflaredPath);
+            }
+
+            // 参考 SOMCP 方案：generation 检查 — 下载后可能已被 stop()
+            if (stopRequested || generation.get() != runGeneration) {
+                fireLog("startInternal: 在启动前已被停止，放弃本次启动");
+                running.set(false);
+                return;
             }
 
             // 2. 预解析边缘节点 IP（IPv4 only）
@@ -289,12 +311,15 @@ public class CloudflareTunnelClient {
 
             // 7. 读取 stdout（同步读取，确保不丢失输出）
             final Process proc = tunnelProcess;
+            final int captureGeneration = runGeneration;
             StringBuilder outputBuffer = new StringBuilder();
             outputThread = new Thread(() -> {
                 try (BufferedReader reader = new BufferedReader(
                         new InputStreamReader(proc.getInputStream()))) {
                     String line;
                     while (running.get() && (line = reader.readLine()) != null) {
+                        // 参考 SOMCP 方案：generation 检查
+                        if (generation.get() != captureGeneration || stopRequested) break;
                         lastOutputTime.set(System.currentTimeMillis());
                         outputBuffer.append(line).append("\n");
                         processLine(line);
@@ -358,6 +383,19 @@ public class CloudflareTunnelClient {
 
         fireLog(line);
 
+        // 参考 SOMCP 方案：检测 Registered tunnel connection 作为连接确认信号
+        if (line.contains("INF Registered tunnel connection")) {
+            if (!connected.getAndSet(true)) {
+                String url = currentPublicUrl;
+                if (url == null) url = "https://" + extractHostname(line);
+                fireLog(">>> 隧道已连接! " + (url != null ? "公网地址: " + url : ""));
+                if (listener != null) {
+                    listener.onConnected(url != null ? url : "");
+                }
+            }
+            return;
+        }
+
         if (mode == TunnelMode.QUICK) {
             Matcher urlMatcher = URL_PATTERN.matcher(line);
             String matchedUrl = null;
@@ -391,8 +429,24 @@ public class CloudflareTunnelClient {
     }
 
     /**
+     * 从日志行中提取主机名（参考 SOMCP 的 urlPattern）
+     */
+    private String extractHostname(String line) {
+        java.util.regex.Matcher m = URL_PATTERN.matcher(line);
+        if (m.find()) {
+            String url = m.group();
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                url = "https://" + url;
+            }
+            return url;
+        }
+        return null;
+    }
+
+    /**
      * 过滤重复/无意义的 cloudflared 日志行。
-     * 只保留用户关心的信息（连接状态、错误、URL），跳过 INF 级别状态更新。
+     * 参考 SOMCP 方案：保留 Registered tunnel connection 作为连接确认信号，
+     * 保留 WAR 级别日志用于问题诊断。
      */
     private boolean shouldSkipLogLine(String line) {
         if (line == null || line.isEmpty()) return true;
@@ -403,13 +457,8 @@ public class CloudflareTunnelClient {
         if (line.contains("INF Each connection will be")) return true;
         if (line.contains("INF Cloudflare Tunnel")) return true;
         if (line.contains("INF 欢迎使用")) return true;
-        // 跳过 INF 级别的连接状态（连接成功后不再需要）
-        if (line.contains("INF Registered tunnel connection")) return true;
-        if (line.contains("INF Connection")) return true;
         // 跳过指标上报（无实际意义）
         if (line.contains("INF Metrics")) return true;
-        // 跳过 WAR 级别但无实际影响的警告
-        if (line.contains("WAR")) return true;
         // 跳过 DBG 级别调试日志
         if (line.contains("DBG")) return true;
 
@@ -461,8 +510,21 @@ public class CloudflareTunnelClient {
         mainHandler.postDelayed(pendingReconnectRunnable, delay);
     }
 
-    public synchronized void stop() {
+    /**
+     * 参考 SOMCP 方案：轻量级停止请求，从主线程同步设置 stopRequested，
+     * 防止在 stop() 实际执行前有重连/health 线程重新进入 start()。
+     */
+    public void requestStop() {
+        stopRequested = true;
+        generation.incrementAndGet();
         autoReconnect = false;
+        cancelPendingReconnect();
+    }
+
+    public synchronized void stop() {
+        stopRequested = true;
+        autoReconnect = false;
+        generation.incrementAndGet();
         running.set(false);
         connected.set(false);
         cancelPendingReconnect();
@@ -475,7 +537,9 @@ public class CloudflareTunnelClient {
      * 调用后 autoReconnect 被永久设为 false，且不会自动恢复。
      */
     public synchronized void forceStop() {
+        stopRequested = true;
         autoReconnect = false;
+        generation.incrementAndGet();
         running.set(false);
         connected.set(false);
         cancelPendingReconnect();

@@ -375,9 +375,11 @@ public class FloatWindowManager {
 
     private void toggleBoreTunnel() {
         if (TunnelService.isRunning(context)) {
-            // 用户主动停止：清除启动标记，保活不再自动拉起
+            // 用户主动停止：先 requestStop 防止重连，再清除标记
             KeepAliveManager.getInstance(context).setTunnelUserStarted(false);
-            context.stopService(new Intent(context, TunnelService.class));
+            Intent intent = new Intent(context, TunnelService.class)
+                    .setAction(TunnelService.ACTION_STOP);
+            context.startService(intent);
         } else {
             SharedPreferences sp = context.getSharedPreferences("tunnel", MODE_PRIVATE);
             String host = sp.getString("bore_host", "bore.pub");
@@ -396,16 +398,20 @@ public class FloatWindowManager {
     }
 
     private void stopBoreTunnel() {
-        // 用户主动停止：清除启动标记，保活不再自动拉起
+        // 用户主动停止：先 requestStop 防止重连，再清除标记
         KeepAliveManager.getInstance(context).setTunnelUserStarted(false);
-        context.stopService(new Intent(context, TunnelService.class));
+        Intent intent = new Intent(context, TunnelService.class)
+                .setAction(TunnelService.ACTION_STOP);
+        context.startService(intent);
     }
 
     private void toggleCfTunnel() {
         if (CloudflareTunnelService.isRunning(context)) {
-            // 用户主动停止：清除启动标记，保活不再自动拉起
+            // 用户主动停止：先 requestStop 防止重连，再清除标记
             KeepAliveManager.getInstance(context).setCfTunnelUserStarted(false);
-            context.stopService(new Intent(context, CloudflareTunnelService.class));
+            Intent intent = new Intent(context, CloudflareTunnelService.class)
+                    .setAction(CloudflareTunnelService.ACTION_STOP);
+            context.startService(intent);
         } else {
             SharedPreferences cfSp = context.getSharedPreferences("cf_tunnel", MODE_PRIVATE);
             int savedPort = cfSp.getInt("cf_local_port", 8080);
@@ -425,9 +431,11 @@ public class FloatWindowManager {
     }
 
     private void stopCfTunnel() {
-        // 用户主动停止：清除启动标记，保活不再自动拉起
+        // 用户主动停止：先 requestStop 防止重连，再清除标记
         KeepAliveManager.getInstance(context).setCfTunnelUserStarted(false);
-        context.stopService(new Intent(context, CloudflareTunnelService.class));
+        Intent intent = new Intent(context, CloudflareTunnelService.class)
+                .setAction(CloudflareTunnelService.ACTION_STOP);
+        context.startService(intent);
     }
 
     // === 空闲吸边 + 使用用户设置的透明度 ===
