@@ -15,7 +15,6 @@ import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 import com.mcpbridge.enhanced.MCPBridgeApp;
 import com.mcpbridge.enhanced.MainActivity;
 import com.mcpbridge.enhanced.R;
-import com.mcpbridge.enhanced.server.McpServer;
 
 
 /**
@@ -65,10 +64,6 @@ public class CloudflareTunnelService extends Service {
 
         startForeground(2001, buildNotification("Cloudflare 隧道启动中..."));
         broadcastEvent("正在启动 Cloudflare 隧道...");
-
-        // 使用引用计数方式获取 MCP Server（防止一个隧道停止时误杀另一个隧道的使用）
-        boolean mcpStarted = McpServer.acquire(localPort);
-        broadcastEvent("[MCP] 本地 MCP Server " + (mcpStarted ? "已启动" : "启动失败") + " (端口: " + localPort + ")");
 
         if (isPermanent && token != null && !token.isEmpty()) {
             client = new CloudflareTunnelClient(this, localPort, token);
@@ -156,8 +151,6 @@ public class CloudflareTunnelService extends Service {
             client.stop();
             client = null;
         }
-        // 释放 MCP Server 引用（仅当所有隧道都释放后才真正停止）
-        McpServer.release();
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_CF_RUNNING, false)
@@ -173,8 +166,6 @@ public class CloudflareTunnelService extends Service {
             client.forceStop();
             client = null;
         }
-        // 释放 MCP Server 引用（仅当所有隧道都释放后才真正停止）
-        McpServer.release();
         // 清除运行状态
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()

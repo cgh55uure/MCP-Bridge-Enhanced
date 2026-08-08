@@ -12,7 +12,6 @@ import androidx.core.app.NotificationCompat;
 import androidx.localbroadcastmanager.content.LocalBroadcastManager;
 
 import com.mcpbridge.enhanced.keepalive.KeepAliveManager;
-import com.mcpbridge.enhanced.server.McpServer;
 import com.mcpbridge.enhanced.MCPBridgeApp;
 import com.mcpbridge.enhanced.MainActivity;
 import com.mcpbridge.enhanced.R;
@@ -121,10 +120,6 @@ public class TunnelService extends Service {
         // 保存配置以便保活后自动重启
         KeepAliveManager.getInstance(this).saveTunnelConfig(boreHost, localPort);
 
-        // 使用引用计数方式获取 MCP Server（防止一个隧道停止时误杀另一个隧道的使用）
-        boolean mcpStarted = McpServer.acquire(localPort);
-        addEvent("[MCP] 本地 MCP Server " + (mcpStarted ? "已启动" : "启动失败") + " (端口: " + localPort + ")");
-
         boreClient = new BoreClient(boreHost, localPort);
         boreClient.setListener(new BoreClient.BoreListener() {
             @Override
@@ -176,8 +171,6 @@ public class TunnelService extends Service {
             boreClient.stop();
             boreClient = null;
         }
-        // 释放 MCP Server 引用（仅当所有隧道都释放后才真正停止）
-        McpServer.release();
         getSharedPreferences("tunnel", MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_TUNNEL_RUNNING, false)
