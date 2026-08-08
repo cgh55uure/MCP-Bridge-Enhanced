@@ -55,10 +55,10 @@ public class CloudflareTunnelService extends Service {
         startForeground(2001, buildNotification("Cloudflare 隧道启动中..."));
         broadcastEvent("正在启动 Cloudflare 隧道...");
 
-        // 先启动本地 MCP Server，确保隧道转发时后端有进程在监听
-        // 这是修复 502 Bad Gateway 的关键：隧道活着但本地没有 Server 处理请求
-        McpServer mcpServer = McpServer.getInstance(localPort);
-        boolean mcpStarted = mcpServer.start();
+        // 强制重启 MCP Server 到隧道配置的端口
+        // 确保端口与隧道设置一致，即使之前已被其他隧道启动
+        McpServer mcpServer = McpServer.getInstance();
+        boolean mcpStarted = mcpServer.restart(localPort);
         broadcastEvent("[MCP] 本地 MCP Server " + (mcpStarted ? "已启动" : "启动失败") + " (端口: " + localPort + ")");
 
         if (isPermanent && token != null && !token.isEmpty()) {
@@ -137,6 +137,8 @@ public class CloudflareTunnelService extends Service {
             client.stop();
             client = null;
         }
+        // 停止 MCP Server，释放端口供其他隧道使用
+        McpServer.getInstance().stop();
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_CF_RUNNING, false)
@@ -152,6 +154,8 @@ public class CloudflareTunnelService extends Service {
             client.forceStop();
             client = null;
         }
+        // 停止 MCP Server，释放端口供其他隧道使用
+        McpServer.getInstance().stop();
         // 清除运行状态
         getSharedPreferences("cf_tunnel", MODE_PRIVATE)
                 .edit()

@@ -101,10 +101,10 @@ public class TunnelService extends Service {
         // 保存配置以便保活后自动重启
         KeepAliveManager.getInstance(this).saveTunnelConfig(boreHost, localPort);
 
-        // 先启动本地 MCP Server，确保隧道转发时后端有进程在监听
-        // 这是修复 502 Bad Gateway 的关键：隧道活着但本地没有 Server 处理请求
-        McpServer mcpServer = McpServer.getInstance(localPort);
-        boolean mcpStarted = mcpServer.start();
+        // 强制重启 MCP Server 到隧道配置的端口
+        // 确保端口与隧道设置一致，即使之前已被其他隧道启动
+        McpServer mcpServer = McpServer.getInstance();
+        boolean mcpStarted = mcpServer.restart(localPort);
         addEvent("[MCP] 本地 MCP Server " + (mcpStarted ? "已启动" : "启动失败") + " (端口: " + localPort + ")");
 
         boreClient = new BoreClient(boreHost, localPort);
@@ -158,6 +158,8 @@ public class TunnelService extends Service {
             boreClient.stop();
             boreClient = null;
         }
+        // 停止 MCP Server，释放端口供其他隧道使用
+        McpServer.getInstance().stop();
         getSharedPreferences("tunnel", MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_TUNNEL_RUNNING, false)

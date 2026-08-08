@@ -166,6 +166,18 @@ public class McpServer {
         return port;
     }
 
+    /**
+     * 强制重启 MCP Server 到指定端口
+     * 无论当前是否运行，都会停止并重新启动
+     */
+    public boolean restart(int newPort) {
+        stop();
+        synchronized (lock) {
+            instance = new McpServer(newPort);
+        }
+        return instance.start();
+    }
+
     public long getUptimeMillis() {
         return System.currentTimeMillis() - startedAt;
     }
