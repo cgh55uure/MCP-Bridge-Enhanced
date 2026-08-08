@@ -566,6 +566,19 @@ public class BoreClient {
             serverToLocal.start();
             localToServer.start();
 
+            // 等待转发线程完成（任一方向断开时，两个线程都会退出）
+            // 必须在这里等待，否则 finally 块会立即关闭 socket，导致转发失败
+            try {
+                serverToLocal.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            try {
+                localToServer.join();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+
         } catch (ConnectException e) {
             fireEvent(now() + " 连接 ID=" + connId + " 本地服务 :" + localPort + " 未连接");
         } catch (SocketTimeoutException e) {
