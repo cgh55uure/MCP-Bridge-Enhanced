@@ -96,20 +96,6 @@ public class CloudflareTunnelClient {
     private final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger(0);
     private volatile boolean stopRequested = false;
 
-    // 健康检查线程（参考 SOMCP 的 startHealthCheck + probeLocal）
-    private Thread healthCheckThread;
-    private static final long HEALTH_CHECK_INTERVAL_MS = 5000;
-    private static final long HEALTH_CHECK_TIMEOUT_MS = 800;
-    private volatile boolean healthCheckPassed = false;
-
-    // 健康检查防抖：参考 SOMCP 的 downSince / lastRestartAt 方案
-    private volatile long healthCheckDownSince = 0L;
-    private volatile long healthCheckLastRestartAt = 0L;
-    private volatile int healthCheckStableCount = 0;
-    private final java.util.concurrent.atomic.AtomicInteger keepaliveRestarts = new java.util.concurrent.atomic.AtomicInteger(0);
-    private static final long HEALTH_CHECK_DOWN_THRESHOLD_MS = 8000;   // 连续失败 8 秒才触发保活重启
-    private static final long HEALTH_CHECK_RESTART_COOLDOWN_MS = 15000; // 两次保活重启至少间隔 15 秒
-
     // URL 匹配模式
     private static final Pattern URL_PATTERN =
             Pattern.compile("https?://[a-zA-Z0-9][-a-zA-Z0-9]*\\.trycloudflare\\.com");
@@ -149,11 +135,6 @@ public class CloudflareTunnelClient {
         connected.set(false);
         reconnectAttempts = 0;
         currentPublicUrl = null;
-        // 重置健康检查状态
-        healthCheckPassed = false;
-        healthCheckDownSince = 0L;
-        healthCheckLastRestartAt = 0L;
-        healthCheckStableCount = 0;
         executor.submit(this::startInternal);
     }
 
@@ -334,10 +315,6 @@ public class CloudflareTunnelClient {
 
             // 6. 启动连接超时检测
             startConnectTimeout();
-
-            // 7. 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck 方案）
-            // 每 5 秒探测一次本地服务端口，确保服务可达
-            startHealthCheck();
 
             // 7. 读取 stdout（同步读取，确保不丢失输出）
             final Process proc = tunnelProcess;
@@ -522,105 +499,6 @@ public class CloudflareTunnelClient {
         timeoutThread.start();
     }
 
-    /**
-     * 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck + probeLocal 方案）。
-     * 每 5 秒探测一次本地端口，检测服务是否可达。
-     *
-     * 防抖逻辑（参考 SOMCP）：
-     * - 连续失败超过 8 秒才触发保活重启
-     * - 两次保活重启至少间隔 15 秒
-     * - 重启前检查 stopRequested，防止在停止过程中误重启
-     * - 整个循环包在 try/catch(InterruptedException) 中，防止 stop() 中断线程时崩溃
-     */
-    private void startHealthCheck() {
-        stopHealthCheck();
-        final int runGeneration = generation.get();
-        healthCheckThread = new Thread(() -> {
-            // 参考 SOMCP 方案：防抖状态变量
-            int stable = 0;
-            long downSince = 0L;
-            long lastRestartAt = 0L;
-            try {
-                while (!stopRequested && generation.get() == runGeneration && running.get()) {
-                    try {
-                        Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
-                    } catch (InterruptedException e) {
-                        // 参考 SOMCP：stop() 中断睡眠时预期抛出，直接退出循环
-                        break;
-                    }
-                    if (stopRequested || generation.get() != runGeneration || !running.get()) break;
-
-                    // TCP 探活本地端口（参考 SOMCP 的 probeLocal）
-                    boolean probeOk = false;
-                    try {
-                        java.net.Socket s = new java.net.Socket();
-                        s.connect(new java.net.InetSocketAddress("127.0.0.1", localPort), (int) HEALTH_CHECK_TIMEOUT_MS);
-                        s.close();
-                        probeOk = true;
-                    } catch (Exception ignored) {
-                    }
-
-                    if (probeOk) {
-                        stable++;
-                        downSince = 0L;
-                        if (!healthCheckPassed) {
-                            healthCheckPassed = true;
-                            healthCheckDownSince = 0L;
-                            healthCheckStableCount = 0;
-                            fireLog("[健康检查] 本地服务端口 " + localPort + " 可达 ✓");
-                        }
-                    } else {
-                        stable = 0;
-                        healthCheckPassed = false;
-                        if (downSince == 0L) downSince = System.currentTimeMillis();
-                        healthCheckDownSince = downSince;
-                        long downElapsed = System.currentTimeMillis() - downSince;
-                        fireLog("[健康检查] 本地服务端口 " + localPort + " 不可达 ✗ (已持续 " + (downElapsed / 1000) + " 秒)");
-
-                        // 参考 SOMCP：仅当隧道已连接时才触发保活重启
-                        if (connected.get() && downElapsed >= HEALTH_CHECK_DOWN_THRESHOLD_MS) {
-                            long sinceLastRestart = System.currentTimeMillis() - lastRestartAt;
-                            if (sinceLastRestart >= HEALTH_CHECK_RESTART_COOLDOWN_MS) {
-                                // 参考 SOMCP：重启前检查 stopRequested 硬门控
-                                if (stopRequested) {
-                                    fireLog("[健康检查] 保活重启被 stopRequested 阻止");
-                                    break;
-                                }
-                                lastRestartAt = System.currentTimeMillis();
-                                healthCheckLastRestartAt = lastRestartAt;
-                                keepaliveRestarts.incrementAndGet();
-                                fireLog("[健康检查] 端口持续不可达，触发生保活重启 (距上次重启 " + (sinceLastRestart / 1000) + " 秒)");
-                                fireError("本地服务端口 " + localPort + " 持续不可达，触发隧道保活重启");
-                                // 参考 SOMCP：使用 startInternal 风格的重新启动
-                                // 这里通过 stop() + start() 实现重启，generation 会递增，旧健康线程会退出
-                                stop();
-                                start();
-                                return;
-                            } else {
-                                fireLog("[健康检查] 距上次重启仅 " + (sinceLastRestart / 1000) + " 秒，跳过保活重启");
-                            }
-                        } else if (connected.get()) {
-                            fireLog("[健康检查] 端口不可达但未超过阈值 (" + HEALTH_CHECK_DOWN_THRESHOLD_MS / 1000 + " 秒)，等待...");
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                if (!stopRequested) {
-                    fireLog("[健康检查] 异常: " + e.getMessage());
-                }
-            }
-        }, "cf-health");
-        healthCheckThread.setDaemon(true);
-        healthCheckThread.start();
-    }
-
-    private void stopHealthCheck() {
-        if (healthCheckThread != null) {
-            healthCheckThread.interrupt();
-            healthCheckThread = null;
-        }
-    }
-
     private void scheduleReconnect() {
         reconnectAttempts++;
         int delay = Math.min((int) (RECONNECT_DELAY_MS * Math.pow(1.5, reconnectAttempts - 1)), 30000);
@@ -686,8 +564,6 @@ public class CloudflareTunnelClient {
 
     private void stopProcess() {
         synchronized (lock) {
-            // 停止健康检查
-            stopHealthCheck();
             if (tunnelProcess != null) {
                 tunnelProcess.destroy();
                 try {
