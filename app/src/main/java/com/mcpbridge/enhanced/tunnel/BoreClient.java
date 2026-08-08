@@ -543,29 +543,12 @@ public class BoreClient {
             }
 
             // 发送 Accept 消息: {"Accept":"uuid"}\0
+            // 注意：发送后 bore 服务器立即桥接外部客户端，数据连接的 InputStream
+            // 上出现的就是外部客户端的原始数据。绝对不能在此处 readJsonMessage 读取
+            // "确认消息" — 那会消耗掉外部客户端发来的数据，导致转发线程无数据可传。
             String acceptMsg = "{\"Accept\":\"" + connId + "\"}\0";
             dataOut.write(acceptMsg.getBytes(StandardCharsets.UTF_8));
             dataOut.flush();
-
-            // 等待服务器确认（非阻塞，超时 3 秒）
-            // 标准 bore 协议在 Accept 后不发送确认消息，直接桥接数据。
-            // 但某些服务器可能会发送 Error 消息（如连接 ID 无效、超时等）。
-            // 尝试读取确认消息，如果超时则正常继续。
-            dataSocket.setSoTimeout(3000);
-            try {
-                String confirmMsg = readJsonMessage(dataIn);
-                if (confirmMsg != null) {
-                    if (confirmMsg.contains("\"Error\"")) {
-                        String errMsg = parseStringValue(confirmMsg, "Error");
-                        throw new IOException("服务器拒绝连接: " + (errMsg != null ? errMsg : confirmMsg));
-                    }
-                    // 收到其他消息（如 Accepted），视为确认成功
-                    fireEvent(now() + " 连接 ID=" + connId + " 服务器确认: " + confirmMsg);
-                }
-            } catch (SocketTimeoutException e) {
-                // 超时是正常的，标准 bore 协议没有确认消息，继续桥接
-            }
-            dataSocket.setSoTimeout(0);
 
             // 连接到本地服务
             localSocket = new Socket();
