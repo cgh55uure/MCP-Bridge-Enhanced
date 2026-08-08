@@ -407,11 +407,13 @@ public class FloatWindowManager {
             KeepAliveManager.getInstance(context).setCfTunnelUserStarted(false);
             context.stopService(new Intent(context, CloudflareTunnelService.class));
         } else {
+            SharedPreferences cfSp = context.getSharedPreferences("cf_tunnel", MODE_PRIVATE);
+            int savedPort = cfSp.getInt("cf_local_port", 8080);
             Intent intent = new Intent(context, CloudflareTunnelService.class);
             intent.putExtra("cf_mode", "quick");
-            intent.putExtra("cf_local_port", 8080);
+            intent.putExtra("cf_local_port", savedPort);
             // 保存配置用于保活重启
-            KeepAliveManager.getInstance(context).saveCfTunnelConfig("quick", 8080, null);
+            KeepAliveManager.getInstance(context).saveCfTunnelConfig("quick", savedPort, null);
             // 用户主动启动：设置标记，保活时才会自动拉起
             KeepAliveManager.getInstance(context).setCfTunnelUserStarted(true);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

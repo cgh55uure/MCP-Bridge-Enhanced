@@ -62,12 +62,23 @@ public class McpServer {
 
     /**
      * 获取或创建 McpServer 实例 (指定端口)
+     * 若端口与当前实例不同且服务未运行，则自动重建新实例
      */
     public static McpServer getInstance(int port) {
         if (instance == null) {
             synchronized (lock) {
                 if (instance == null) {
                     instance = new McpServer(port);
+                }
+            }
+        } else if (instance.port != port) {
+            synchronized (lock) {
+                if (instance.port != port) {
+                    if (!instance.running.get()) {
+                        // 端口变更且服务未运行，重建实例
+                        instance = new McpServer(port);
+                    }
+                    // 如果服务已在运行，无法变更端口，保持当前实例
                 }
             }
         }
