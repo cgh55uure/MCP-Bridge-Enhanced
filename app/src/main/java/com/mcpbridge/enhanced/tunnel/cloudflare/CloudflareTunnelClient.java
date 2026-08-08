@@ -94,7 +94,7 @@ public class CloudflareTunnelClient {
 
     // 参考 SOMCP 方案：generation 并发控制 + stopRequested 硬门控
     private final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger(0);
-    @Volatile private boolean stopRequested = false;
+    private volatile boolean stopRequested = false;
 
     // URL 匹配模式
     private static final Pattern URL_PATTERN =
