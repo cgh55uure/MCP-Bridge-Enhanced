@@ -89,19 +89,27 @@ public class BoreClient {
 
     private static String parseHost(String hostPort) {
         if (hostPort == null || hostPort.isEmpty()) return "bore.pub";
-        int colonIdx = hostPort.indexOf(':');
+        // 去掉 http:// 或 https:// 前缀
+        String raw = hostPort;
+        if (raw.startsWith("https://")) raw = raw.substring(8);
+        else if (raw.startsWith("http://")) raw = raw.substring(7);
+        int colonIdx = raw.indexOf(':');
         if (colonIdx > 0) {
-            return hostPort.substring(0, colonIdx);
+            return raw.substring(0, colonIdx);
         }
-        return hostPort;
+        return raw;
     }
 
     private static int parsePort(String hostPort, int defaultPort) {
         if (hostPort == null || hostPort.isEmpty()) return defaultPort;
-        int colonIdx = hostPort.indexOf(':');
-        if (colonIdx > 0 && colonIdx < hostPort.length() - 1) {
+        // 去掉 http:// 或 https:// 前缀
+        String raw = hostPort;
+        if (raw.startsWith("https://")) raw = raw.substring(8);
+        else if (raw.startsWith("http://")) raw = raw.substring(7);
+        int colonIdx = raw.indexOf(':');
+        if (colonIdx > 0 && colonIdx < raw.length() - 1) {
             try {
-                return Integer.parseInt(hostPort.substring(colonIdx + 1));
+                return Integer.parseInt(raw.substring(colonIdx + 1));
             } catch (NumberFormatException ignored) {}
         }
         return defaultPort;
@@ -109,11 +117,15 @@ public class BoreClient {
 
     private static String parseSecret(String hostPort) {
         if (hostPort == null || hostPort.isEmpty()) return null;
-        int firstColon = hostPort.indexOf(':');
+        // 去掉 http:// 或 https:// 前缀
+        String raw = hostPort;
+        if (raw.startsWith("https://")) raw = raw.substring(8);
+        else if (raw.startsWith("http://")) raw = raw.substring(7);
+        int firstColon = raw.indexOf(':');
         if (firstColon <= 0) return null;
-        int secondColon = hostPort.indexOf(':', firstColon + 1);
-        if (secondColon > 0 && secondColon < hostPort.length() - 1) {
-            return hostPort.substring(secondColon + 1);
+        int secondColon = raw.indexOf(':', firstColon + 1);
+        if (secondColon > 0 && secondColon < raw.length() - 1) {
+            return raw.substring(secondColon + 1);
         }
         return null;
     }
