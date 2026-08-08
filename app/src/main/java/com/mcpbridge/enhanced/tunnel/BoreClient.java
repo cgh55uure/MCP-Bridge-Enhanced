@@ -65,15 +65,19 @@ public class BoreClient {
     private static final byte NULL_DELIMITER = 0x00;
     private static final int MAX_FRAME_LENGTH = 65536;
 
-    // 客户端心跳间隔（NAT 保活）：移动网络 NAT 映射通常在 30-60s 回收
-    // 每 15 秒发送一次心跳，确保 TCP 连接在 NAT 网关中保持活跃
-    private static final int HEARTBEAT_INTERVAL_MS = 15000;
+    // 控制连接读取超时：服务器每 ~15 秒发送一次心跳，20 秒超时足够覆盖网络延迟
+    // 超时后不发送任何消息（bore 协议的 ClientMessage 只接受 Hello/Accept/Authenticate，
+    // 发送其他消息会被服务器拒绝并断开连接），仅继续等待下一帧
+    private static final int CONTROL_READ_TIMEOUT_MS = 20000;
+
+    // 连续超时次数上限：超过此值说明连接可能已断开（服务器无响应），主动重连
+    private static final int MAX_CONSECUTIVE_TIMEOUTS = 3;
 
     // 自动重连
     private volatile boolean autoReconnect = true;
     private final AtomicInteger reconnectAttempts = new AtomicInteger(0);
-    private static final int MAX_RECONNECT_ATTEMPTS = 10;
-    private static final int RECONNECT_DELAY_MS = 5000;
+    private static final int MAX_RECONNECT_ATTEMPTS = 100;
+    private static final int RECONNECT_DELAY_MS = 1000;
     private Thread reconnectThread;
     private volatile boolean stopRequested = false;
 
@@ -288,10 +292,13 @@ public class BoreClient {
                     listener.onConnected(publicUrl);
                 }
 
-                // 设置控制 socket 读取超时，超时后发送心跳保活
-                // 移动网络 NAT 映射通常在 30-60s 内回收空闲连接，
-                // 客户端主动发送心跳帧可保持 NAT 映射活跃
-                controlSocket.setSoTimeout(HEARTBEAT_INTERVAL_MS);
+                // 控制连接读取超时：服务器每 ~15 秒发送心跳帧，20 秒超时足够
+                // 超时后不发送任何消息 — bore 协议的 ClientMessage 只接受
+                // Hello/Accept/Authenticate，发送其他消息会被服务器拒绝并断开连接
+                controlSocket.setSoTimeout(CONTROL_READ_TIMEOUT_MS);
+
+                // 连续超时计数：超过阈值说明连接已断，主动重连
+                int consecutiveTimeouts = 0;
 
                 // 控制通道循环：读取 JSON 消息
                 while (running && !controlSocket.isClosed()) {
@@ -300,9 +307,16 @@ public class BoreClient {
                     String msg;
                     try {
                         msg = readJsonMessage(controlIn);
+                        // 成功读取到消息，重置超时计数
+                        consecutiveTimeouts = 0;
                     } catch (SocketTimeoutException e) {
-                        // 读取超时 → 发送心跳保活，防止 NAT 映射超时回收
-                        sendKeepAlive(controlOut);
+                        // 读取超时 — 服务器可能暂时无数据，不发送心跳（避免协议冲突）
+                        // 仅记录超时次数，连续多次超时则视为连接断开
+                        consecutiveTimeouts++;
+                        if (consecutiveTimeouts >= MAX_CONSECUTIVE_TIMEOUTS) {
+                            fireEvent(now() + " 控制连接无响应 (" + (CONTROL_READ_TIMEOUT_MS * MAX_CONSECUTIVE_TIMEOUTS / 1000) + " 秒)，准备重连");
+                            break;
+                        }
                         continue;
                     } catch (SocketException e) {
                         if (running) fireEvent(now() + " 控制连接异常: " + e.getMessage());
@@ -381,12 +395,11 @@ public class BoreClient {
 
     private void scheduleReconnect() {
         int attempts = reconnectAttempts.incrementAndGet();
-        int delay = Math.min(RECONNECT_DELAY_MS * (1 << (attempts - 1)), 30000);
-        fireEvent(now() + " 将在 " + (delay / 1000) + " 秒后自动重连 (第 " + attempts + "/" + MAX_RECONNECT_ATTEMPTS + " 次)");
+        fireEvent(now() + " 将在 1 秒后自动重连 (第 " + attempts + "/" + MAX_RECONNECT_ATTEMPTS + " 次)");
         final int reconnectGeneration = generation.get();
         reconnectThread = new Thread(() -> {
             try {
-                Thread.sleep(delay);
+                Thread.sleep(RECONNECT_DELAY_MS);
             } catch (InterruptedException e) {
                 return;
             }
@@ -489,25 +502,6 @@ public class BoreClient {
                 .replace("\n", "\\n")
                 .replace("\r", "\\r")
                 .replace("\t", "\\t");
-    }
-
-    /**
-     * 发送心跳保活帧，防止移动网络 NAT 映射超时回收 TCP 连接
-     *
-     * 标准 ekzhang/bore 协议使用 AnyDelimiterCodec 处理消息帧，
-     * 服务器收到 {"Heartbeat":null} 后会忽略该消息（与服务器发往客户端的心跳格式一致）。
-     * 发送心跳的主要目的是在 TCP 层面产生数据流，重置 NAT 网关的空闲计时器，
-     * 避免因长时间无数据交互导致 NAT 映射被回收、控制连接断开。
-     */
-    private void sendKeepAlive(OutputStream out) {
-        try {
-            // 心跳消息格式与服务器心跳一致，服务器会忽略客户端发来的心跳消息
-            String heartbeat = "{\"Heartbeat\":null}\0";
-            out.write(heartbeat.getBytes(StandardCharsets.UTF_8));
-            out.flush();
-        } catch (IOException e) {
-            // 写失败说明连接已断开，由主循环的 SocketException 捕获处理
-        }
     }
 
     private void handleDataConnection(String connId) {
