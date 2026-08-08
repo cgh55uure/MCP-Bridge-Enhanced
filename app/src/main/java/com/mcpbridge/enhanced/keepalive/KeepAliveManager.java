@@ -157,27 +157,45 @@ public class KeepAliveManager {
     }
 
     // ===== 用户主动启动标记（用于区分自启动和保活重启） =====
+    //
+    // 参考 SOMCP 方案：使用 volatile 内存标记作为当前会话的启动状态，
+    // 持久化标记仅用于记录用户"曾经"启动过，不用于保活判断。
+    //
+    // 保活判断逻辑：只有内存标记为 true 时才重启隧道。
+    // 这意味着：
+    //   1. 用户在当前会话中启动过隧道 → 保活可以重启
+    //   2. App 进程被系统杀死后重启 → 内存标记丢失 → 保活不会自动重启
+    //   3. 用户再次主动点击启动 → 内存标记重新设置 → 保活恢复
+    //
+    // 这样既保证了"用户主动启动的隧道在运行中不会被系统杀死"，
+    // 又避免了"用户打开 app 发现隧道自己启动了"的问题。
 
     private static final String PREF_TUNNEL_STARTED = "tunnel_user_started";
     private static final String PREF_CF_TUNNEL_STARTED = "cf_tunnel_user_started";
+
+    // 当前会话的内存标记（app 进程重启后自动重置为 false）
+    private volatile boolean sessionTunnelStarted = false;
+    private volatile boolean sessionCfTunnelStarted = false;
 
     /**
      * 设置 Bore 隧道用户主动启动标记
      * @param started true=用户主动启动, false=用户主动停止
      */
     public void setTunnelUserStarted(boolean started) {
+        // 持久化标记（用于 UI 显示历史状态）
         context.getSharedPreferences("tunnel", Context.MODE_PRIVATE)
                 .edit()
                 .putBoolean(PREF_TUNNEL_STARTED, started)
                 .apply();
+        // 会话标记（用于保活判断，app 重启后自动失效）
+        sessionTunnelStarted = started;
     }
 
     /**
-     * 检查 Bore 隧道是否曾被用户主动启动过
+     * 检查 Bore 隧道是否曾被用户主动启动过（当前会话）
      */
     public boolean isTunnelUserStarted() {
-        return context.getSharedPreferences("tunnel", Context.MODE_PRIVATE)
-                .getBoolean(PREF_TUNNEL_STARTED, false);
+        return sessionTunnelStarted;
     }
 
     /**
@@ -189,14 +207,14 @@ public class KeepAliveManager {
                 .edit()
                 .putBoolean(PREF_CF_TUNNEL_STARTED, started)
                 .apply();
+        sessionCfTunnelStarted = started;
     }
 
     /**
-     * 检查 CF 隧道是否曾被用户主动启动过
+     * 检查 CF 隧道是否曾被用户主动启动过（当前会话）
      */
     public boolean isCfTunnelUserStarted() {
-        return context.getSharedPreferences("cf_tunnel", Context.MODE_PRIVATE)
-                .getBoolean(PREF_CF_TUNNEL_STARTED, false);
+        return sessionCfTunnelStarted;
     }
 
     public void saveTunnelConfig(String host, int localPort) {

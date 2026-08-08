@@ -138,6 +138,8 @@ public class FloatWindowManager {
             isSnappedToEdge = false;
             isTransitioning = false;
             idleHandler.postDelayed(idleEdgeSnapRunnable, IDLE_SNAP_DELAY_MS);
+            // 启动定时健康检查，确保状态及时更新
+            startHealthCheck();
         } catch (Exception e) {
             isShowing = false;
             isTransitioning = false;
@@ -262,7 +264,8 @@ public class FloatWindowManager {
     private void updateMcpStatus() {
         if (floatView == null) return;
         McpServer mcpServer = McpServer.getInstance();
-        boolean mcpRunning = mcpServer.isRunning();
+        // 使用 TCP 探活检测 MCP Server 是否真正可达（参考 SOMCP 方案）
+        boolean mcpRunning = McpServer.probeRunning();
         int mcpPort = mcpServer.getPort();
 
         TextView tvMcpStatus = floatView.findViewById(R.id.tvMcpStatus);
@@ -275,10 +278,57 @@ public class FloatWindowManager {
             if (mcpRunning) {
                 tvMcpInfo.setText("运行中 :" + mcpPort + "  ✓");
             } else {
-                tvMcpInfo.setText("未启动");
+                tvMcpInfo.setText("未启动（启动隧道后自动启动）");
             }
         }
     }
+
+    /**
+     * 启动定时健康检查（每 3 秒检测一次 MCP Server 和隧道状态）。
+     * 参考 SOMCP 的 health check 方案，确保状态及时更新。
+     */
+    public void startHealthCheck() {
+        healthCheckHandler.removeCallbacks(healthCheckRunnable);
+        healthCheckHandler.postDelayed(healthCheckRunnable, HEALTH_CHECK_INTERVAL_MS);
+    }
+
+    /**
+     * 停止定时健康检查
+     */
+    public void stopHealthCheck() {
+        healthCheckHandler.removeCallbacks(healthCheckRunnable);
+    }
+
+    private final Handler healthCheckHandler = new Handler(Looper.getMainLooper());
+    private static final long HEALTH_CHECK_INTERVAL_MS = 3000;
+
+    private final Runnable healthCheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (floatView == null) return;
+            if (isExpanded) {
+                updatePanelView();
+            } else {
+                // 气泡模式：更新连接状态指示
+                boolean anyConnected = TunnelService.isRunning(context)
+                        || CloudflareTunnelService.isRunning(context);
+                TextView tvBubble = floatView.findViewById(R.id.tvFloatBubble);
+                if (tvBubble != null) {
+                    if (anyConnected) {
+                        tvBubble.setTextColor(context.getColor(R.color.status_connected));
+                        tvBubble.setText("●");
+                        tvBubble.setContentDescription("已连接");
+                    } else {
+                        tvBubble.setTextColor(context.getColor(R.color.status_disconnected));
+                        tvBubble.setText("○");
+                        tvBubble.setContentDescription("未连接");
+                    }
+                }
+            }
+            // 继续下一轮检测
+            healthCheckHandler.postDelayed(this, HEALTH_CHECK_INTERVAL_MS);
+        }
+    };
 
     private void updateTunnelSection(int statusId, int urlId, int copyId,
                                      int toggleId, int disconnectId,
@@ -566,6 +616,7 @@ public class FloatWindowManager {
         isShowing = false;
         floatView = null;
         idleHandler.removeCallbacks(idleEdgeSnapRunnable);
+        stopHealthCheck();
     }
 
     public void restore() {

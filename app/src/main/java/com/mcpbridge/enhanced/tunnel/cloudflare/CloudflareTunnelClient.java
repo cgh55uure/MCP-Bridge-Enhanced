@@ -96,6 +96,12 @@ public class CloudflareTunnelClient {
     private final java.util.concurrent.atomic.AtomicInteger generation = new java.util.concurrent.atomic.AtomicInteger(0);
     private volatile boolean stopRequested = false;
 
+    // 健康检查线程（参考 SOMCP 的 startHealthCheck + probeLocal）
+    private Thread healthCheckThread;
+    private static final long HEALTH_CHECK_INTERVAL_MS = 5000;
+    private static final long HEALTH_CHECK_TIMEOUT_MS = 800;
+    private volatile boolean healthCheckPassed = false;
+
     // URL 匹配模式
     private static final Pattern URL_PATTERN =
             Pattern.compile("https?://[a-zA-Z0-9][-a-zA-Z0-9]*\\.trycloudflare\\.com");
@@ -309,6 +315,10 @@ public class CloudflareTunnelClient {
             // 6. 启动连接超时检测
             startConnectTimeout();
 
+            // 7. 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck 方案）
+            //    每 5 秒探测一次 MCP Server 端口，确保服务可达
+            startHealthCheck();
+
             // 7. 读取 stdout（同步读取，确保不丢失输出）
             final Process proc = tunnelProcess;
             final int captureGeneration = runGeneration;
@@ -492,6 +502,64 @@ public class CloudflareTunnelClient {
         timeoutThread.start();
     }
 
+    /**
+     * 启动本地端口健康检查（参考 SOMCP 的 startHealthCheck + probeLocal 方案）。
+     * 每 5 秒探测一次 MCP Server 本地端口，检测服务是否可达。
+     */
+    private void startHealthCheck() {
+        stopHealthCheck();
+        final int runGeneration = generation.get();
+        healthCheckThread = new Thread(() -> {
+            try {
+                while (!stopRequested && generation.get() == runGeneration && running.get()) {
+                    try {
+                        Thread.sleep(HEALTH_CHECK_INTERVAL_MS);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                    if (stopRequested || generation.get() != runGeneration || !running.get()) break;
+
+                    // TCP 探活本地端口（参考 SOMCP 的 probeLocal）
+                    boolean probeOk = false;
+                    try {
+                        java.net.Socket s = new java.net.Socket();
+                        s.connect(new java.net.InetSocketAddress("127.0.0.1", localPort), (int) HEALTH_CHECK_TIMEOUT_MS);
+                        s.close();
+                        probeOk = true;
+                    } catch (Exception ignored) {
+                    }
+
+                    if (probeOk) {
+                        if (!healthCheckPassed) {
+                            healthCheckPassed = true;
+                            fireLog("[健康检查] MCP Server 端口 " + localPort + " 可达 ✓");
+                        }
+                    } else {
+                        healthCheckPassed = false;
+                        fireLog("[健康检查] MCP Server 端口 " + localPort + " 不可达 ✗");
+                        // 如果隧道已连接但 MCP Server 端口不可达，报告错误
+                        if (connected.get()) {
+                            fireError("MCP Server 端口 " + localPort + " 不可达，隧道可能失效");
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                if (!stopRequested) {
+                    fireLog("[健康检查] 异常: " + e.getMessage());
+                }
+            }
+        }, "cf-health");
+        healthCheckThread.setDaemon(true);
+        healthCheckThread.start();
+    }
+
+    private void stopHealthCheck() {
+        if (healthCheckThread != null) {
+            healthCheckThread.interrupt();
+            healthCheckThread = null;
+        }
+    }
+
     private void scheduleReconnect() {
         reconnectAttempts++;
         int delay = Math.min((int) (RECONNECT_DELAY_MS * Math.pow(1.5, reconnectAttempts - 1)), 30000);
@@ -557,6 +625,8 @@ public class CloudflareTunnelClient {
 
     private void stopProcess() {
         synchronized (lock) {
+            // 停止健康检查
+            stopHealthCheck();
             if (tunnelProcess != null) {
                 tunnelProcess.destroy();
                 try {

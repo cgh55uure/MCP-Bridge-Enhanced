@@ -233,6 +233,34 @@ public class McpServer {
         return referenceCount.get();
     }
 
+    /**
+     * TCP 探活检测：实际连接 MCP Server 的端口，确认服务是否可达。
+     * 参考 SOMCP 的 probeLocal() 方案，使用 Socket 连接测试，
+     * 比仅检查 running 状态更准确（能检测到进程卡死等情况）。
+     *
+     * @param port 要检测的端口
+     * @param timeoutMs 连接超时（毫秒）
+     * @return true 表示端口可达
+     */
+    public static boolean probePort(int port, int timeoutMs) {
+        try {
+            java.net.Socket socket = new java.net.Socket();
+            socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), timeoutMs);
+            socket.close();
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * TCP 探活检测当前 MCP Server 实例端口（默认 800ms 超时）
+     */
+    public static boolean probeRunning() {
+        if (instance == null) return false;
+        return probePort(instance.port, 800);
+    }
+
     public long getUptimeMillis() {
         return System.currentTimeMillis() - startedAt;
     }

@@ -129,6 +129,8 @@ public class MainActivity extends AppCompatActivity {
         });
         // 初始化 MCP Server 状态显示
         updateMcpServerStatus();
+        // 启动定时 MCP 状态检测（每 3 秒 TCP 探活一次）
+        startMcpHealthCheck();
 
         // 在后台线程执行非关键初始化（保活服务等），避免阻塞主线程渲染
         new Thread(() -> {
@@ -344,6 +346,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         LocalBroadcastManager.getInstance(this).unregisterReceiver(tunnelStatusReceiver);
+        // 停止定时 MCP 状态检测
+        mcpHealthHandler.removeCallbacks(mcpHealthRunnable);
     }
 
     @Override
@@ -439,12 +443,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 更新 MCP Server 状态显示
+     * 更新 MCP Server 状态显示（使用 TCP 探活，参考 SOMCP 方案）
      */
     private void updateMcpServerStatus() {
         McpServer mcpServer = McpServer.getInstance();
+        // 使用 TCP 探活检测 MCP Server 是否真正可达
+        boolean mcpRunning = McpServer.probeRunning();
         if (tvMcpServerStatus != null) {
-            if (mcpServer.isRunning()) {
+            if (mcpRunning) {
                 tvMcpServerStatus.setText("✓ MCP Server 运行中 (端口: " + mcpServer.getPort() + ")");
                 tvMcpServerStatus.setTextColor(getColor(R.color.status_connected));
             } else {
@@ -453,6 +459,23 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+
+    /**
+     * 启动定时 MCP 状态检测（每 3 秒刷新一次）
+     */
+    private void startMcpHealthCheck() {
+        mcpHealthHandler.removeCallbacks(mcpHealthRunnable);
+        mcpHealthHandler.postDelayed(mcpHealthRunnable, 3000);
+    }
+
+    private final Handler mcpHealthHandler = new Handler(Looper.getMainLooper());
+    private final Runnable mcpHealthRunnable = new Runnable() {
+        @Override
+        public void run() {
+            updateMcpServerStatus();
+            mcpHealthHandler.postDelayed(this, 3000);
+        }
+    };
 
     // ===== 日志分离 =====
 
