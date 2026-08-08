@@ -13,9 +13,9 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -51,7 +51,10 @@ public class BoreClient {
     private BoreListener listener;
     private Thread tunnelThread;
     private volatile boolean running = false;
-    private final ExecutorService dataExecutor;
+    private ExecutorService dataExecutor;
+
+    // 追踪每个数据连接的线程，用于 stop() 时中断清理
+    private final ConcurrentHashMap<String, Thread> connectionThreads = new ConcurrentHashMap<>();
 
     // 服务器分配的端口（start() 中设置，handleDataConnection 中使用）
     private volatile int assignedPort = -1;
@@ -59,7 +62,6 @@ public class BoreClient {
     private static final int DEFAULT_BORE_PORT = 7835;
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int LOCAL_CONNECT_TIMEOUT_MS = 5000;
-    private static final int MAX_DATA_THREADS = 32;
     private static final byte NULL_DELIMITER = 0x00;
     private static final int MAX_FRAME_LENGTH = 65536;
 
@@ -101,7 +103,6 @@ public class BoreClient {
         this.borePort = borePort > 0 ? borePort : DEFAULT_BORE_PORT;
         this.localPort = localPort > 0 ? localPort : 8080;
         this.secret = secret;
-        this.dataExecutor = Executors.newFixedThreadPool(MAX_DATA_THREADS);
     }
 
     private static String parseHost(String hostPort) {
@@ -166,6 +167,10 @@ public class BoreClient {
 
     public synchronized void start() {
         if (running) return;
+        // 每次启动创建新的线程池，确保 stop() 后重启能正常工作
+        if (dataExecutor == null || dataExecutor.isShutdown()) {
+            dataExecutor = Executors.newCachedThreadPool();
+        }
         // 参考 SOMCP 方案：重置门控状态，递增 generation
         stopRequested = false;
         generation.incrementAndGet();
@@ -322,7 +327,18 @@ public class BoreClient {
                         if (connId != null) {
                             fireEvent(now() + " 新连接请求 ID=" + connId + "，正在转发到本地 :" + localPort);
                             final String id = connId;
-                            dataExecutor.submit(() -> handleDataConnection(id));
+                            final int connGen = generation.get();
+                            dataExecutor.submit(() -> {
+                                // generation 检查：跳过旧 generation 的过期连接
+                                if (generation.get() != connGen || stopRequested) return;
+                                Thread t = Thread.currentThread();
+                                connectionThreads.put(id, t);
+                                try {
+                                    handleDataConnection(id);
+                                } finally {
+                                    connectionThreads.remove(id);
+                                }
+                            });
                         }
                     } else if (msg.contains("\"Error\"")) {
                         String errMsg = parseStringValue(msg, "Error");
@@ -513,9 +529,36 @@ public class BoreClient {
             dataOut.write(acceptMsg.getBytes(StandardCharsets.UTF_8));
             dataOut.flush();
 
+            // 等待服务器确认（非阻塞，超时 3 秒）
+            // 标准 bore 协议在 Accept 后不发送确认消息，直接桥接数据。
+            // 但某些服务器可能会发送 Error 消息（如连接 ID 无效、超时等）。
+            // 尝试读取确认消息，如果超时则正常继续。
+            dataSocket.setSoTimeout(3000);
+            try {
+                String confirmMsg = readJsonMessage(dataIn);
+                if (confirmMsg != null) {
+                    if (confirmMsg.contains("\"Error\"")) {
+                        String errMsg = parseStringValue(confirmMsg, "Error");
+                        throw new IOException("服务器拒绝连接: " + (errMsg != null ? errMsg : confirmMsg));
+                    }
+                    // 收到其他消息（如 Accepted），视为确认成功
+                    fireEvent(now() + " 连接 ID=" + connId + " 服务器确认: " + confirmMsg);
+                }
+            } catch (SocketTimeoutException e) {
+                // 超时是正常的，标准 bore 协议没有确认消息，继续桥接
+            }
+            dataSocket.setSoTimeout(0);
+
             // 连接到本地服务
             localSocket = new Socket();
             localSocket.connect(new InetSocketAddress("127.0.0.1", localPort), LOCAL_CONNECT_TIMEOUT_MS);
+
+            // 连接本地服务后，再加一个小延迟确保数据桥完全就绪
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
 
             fireEvent(now() + " 连接 ID=" + connId + " 已建立，开始转发");
 
@@ -536,9 +579,13 @@ public class BoreClient {
                         localOut.flush();
                         if (listener != null) listener.onBytesTransferred(n);
                     }
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    // 正常断开时也会触发 IOException，不需要输出到 UI
+                    // 只有在连接活跃时发生的异常才需要记录
+                    if (!finalDataSocket.isClosed() && !Thread.currentThread().isInterrupted()) {
+                        // 静默处理，不触发 UI 事件
+                    }
                 } finally {
-                    // 任一方向完成，关闭两个 socket 以终止另一方向
                     try { finalDataSocket.close(); } catch (IOException ignored) {}
                     try { finalLocalSocket.close(); } catch (IOException ignored) {}
                 }
@@ -553,9 +600,11 @@ public class BoreClient {
                         dataOut.flush();
                         if (listener != null) listener.onBytesTransferred(n);
                     }
-                } catch (IOException ignored) {
+                } catch (IOException e) {
+                    if (!finalDataSocket.isClosed() && !Thread.currentThread().isInterrupted()) {
+                        // 静默处理
+                    }
                 } finally {
-                    // 任一方向完成，关闭两个 socket 以终止另一方向
                     try { finalDataSocket.close(); } catch (IOException ignored) {}
                     try { finalLocalSocket.close(); } catch (IOException ignored) {}
                 }
@@ -749,7 +798,14 @@ public class BoreClient {
             tunnelThread.interrupt();
             tunnelThread = null;
         }
-        dataExecutor.shutdownNow();
+        // 中断所有活跃的数据连接线程
+        for (Thread t : connectionThreads.values()) {
+            if (t != null) t.interrupt();
+        }
+        connectionThreads.clear();
+        if (dataExecutor != null && !dataExecutor.isShutdown()) {
+            dataExecutor.shutdownNow();
+        }
     }
 
     public boolean isRunning() {
